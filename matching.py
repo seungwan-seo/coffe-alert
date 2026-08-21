@@ -64,12 +64,15 @@ def match_buysell(search_cfg: dict, item: dict, freshness_days: float = 3) -> st
     min_price = search_cfg.get("min_price") or 0
     if min_price and item.get("price") is not None and item["price"] < min_price:
         return "temp"
-    # 당근 검색은 키워드 없는 연관 상품도 섞어 준다 — 키워드 토큰이 제목/본문에 실제로 있어야 알림
-    tokens = search_cfg["keyword"].split()
+    # 당근 검색은 키워드 없는 연관 상품도 섞어 준다 — 키워드(또는 별칭) 토큰이
+    # 제목/본문에 실제로 있어야 알림. aliases로 표기 변형(커피 머신/에스프레소 머신 등)을 인정한다.
     text = f"{item.get('title') or ''} {item.get('content') or ''}"
-    if tokens and not all(t in text for t in tokens):
-        return "temp"
-    return "match"
+    phrases = [search_cfg["keyword"]] + (search_cfg.get("aliases") or [])
+    for phrase in phrases:
+        tokens = phrase.split()
+        if tokens and all(t in text for t in tokens):
+            return "match"
+    return "temp"
 
 
 def prefilter_title(cfg: dict, title: str) -> bool:

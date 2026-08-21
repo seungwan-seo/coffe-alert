@@ -28,19 +28,17 @@ buysell:
   enabled: true
   freshness_days: 3   # 등록된 지 이 일수 넘은 매물은 알리지 않음 (첫 순회 폭주 방지)
   # 검색어별로 서울 전체 동을 회전 순회하며 폴링. min_price(원) 미만은 노이즈로 버림.
+  # aliases: 판매글 표기 변형 — 본문에 키워드 또는 별칭 중 하나만 있으면 매칭 인정.
   searches:
-    - keyword: "무인카페"
-      min_price: 0
-    - keyword: "카페 양도"
-      min_price: 500000    # 이용권/굿즈 '양도' 노이즈 차단 — 진짜 가게 양도는 수백만원대
-    - keyword: "무인 매장"
-      min_price: 100000    # 할인쿠폰 등 소액 노이즈 차단
-    - keyword: "커피머신"
-      min_price: 500000
-    - keyword: "키오스크"
-      min_price: 300000
     - keyword: "제빙기"
       min_price: 300000
+      aliases: ["아이스메이커", "아이스 메이커"]
+    - keyword: "커피머신"
+      min_price: 500000
+      aliases: ["커피 머신", "에스프레소 머신", "에스프레소머신", "커피 기계", "커피기계"]
+    - keyword: "에스프레소 머신"
+      min_price: 500000
+      aliases: ["커피머신", "커피 머신", "에스프레소머신"]
 
 poll:
   realty_delay_sec: 1.2        # 부동산 요청 간 대기
