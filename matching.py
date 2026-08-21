@@ -1,11 +1,29 @@
 """설정 기반 필터링 로직."""
+import re
 from datetime import datetime, timedelta, timezone
+
+# "음식점,카페,플라워샵은 안됩니다" / "카페 업종은 불가" 처럼 업종을 금지하는 문구를 걸러내기 위한 것.
+# 키워드 바로 뒤(같은 절, 10자 이내)에 부정 표현이 오면 그 등장은 매칭으로 치지 않는다.
+# 창을 좁게 잡은 이유: "카페 추천 자리, 흡연은 안됩니다"처럼 뒤쪽의 무관한 부정문까지
+# 삼켜서 진짜 매물을 놓치는 게, 금지 매물 하나 더 오는 것보다 손해가 크다.
+NEGATION_RE = re.compile(r"안\s*되|안\s*됩|안됨|불가|제외|금지|못\s*하|힘듭니다|어렵습니다")
+NEGATION_WINDOW = 12
+# 키워드와 부정어 사이에 이런 말이 끼어 있으면 그 부정은 다른 얘기로 본다
+POSITIVE_RE = re.compile(r"추천|가능|자리|창업|운영|양도|영업|인수|매출")
+CLAUSE_SPLIT_RE = re.compile(r"[\n.!?;]+")
 
 
 def _keyword_hit(text: str, keywords: list, excludes: list) -> bool:
     for phrase in excludes:
         text = text.replace(phrase, "")
-    return any(kw in text for kw in keywords)
+    for clause in CLAUSE_SPLIT_RE.split(text):
+        for kw in keywords:
+            for m in re.finditer(re.escape(kw), clause):
+                window = clause[m.end():m.end() + NEGATION_WINDOW]
+                neg = NEGATION_RE.search(window)
+                if not neg or POSITIVE_RE.search(window[:neg.start()]):
+                    return True   # 부정 문맥이 아닌 등장이 하나라도 있으면 매칭
+    return False
 
 
 def match_realty(cfg: dict, listing: dict):
