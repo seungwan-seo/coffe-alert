@@ -16,6 +16,12 @@ DEFAULT = {
     "buysell_seen": {},         # {고유코드: unix_ts}
     "buysell_cursor": 0,        # (동×키워드) 순회 위치
     "outbox": [],               # 전송 실패한 알림 — 다음 실행에서 재시도
+    "tg_offset": 0,             # getUpdates 오프셋 (명령어 처리)
+    "realty_watch": {},         # 알림된 부동산 매물 가격 추적: {id: {"trade": {...}, "ts": ..., "url": ...}}
+    "buysell_watch": {},        # 알림된 장비 가격 추적: {id: {"price": int, "ts": ..., "title": ..., "url": ...}}
+    "watch_cursor": 0,          # 가격 재확인 순회 위치
+    "stats": {},                # 아침 요약용 카운터: {"realty": n, "buysell": n, "drop": n}
+    "last_digest_day": "",      # 마지막 아침 요약을 보낸 날짜 (KST, YYYY-MM-DD)
 }
 
 PENDING_CAP = 8000
@@ -34,6 +40,11 @@ def save_state(state: dict, max_age_days: int = 90) -> None:
     for key in ("realty_seen", "buysell_seen"):
         state[key] = {k: v for k, v in state[key].items() if v >= cutoff}
     state["realty_pending"] = state["realty_pending"][:PENDING_CAP]
+    # 가격 추적은 최근 등록순으로 상한 유지 (30일 지난 항목은 정리)
+    watch_cutoff = time.time() - 30 * 86400
+    for key in ("realty_watch", "buysell_watch"):
+        alive = {k: v for k, v in state[key].items() if v.get("ts", 0) >= watch_cutoff}
+        state[key] = dict(sorted(alive.items(), key=lambda kv: kv[1].get("ts", 0), reverse=True)[:300])
     os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
     tmp = STATE_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:

@@ -50,5 +50,8 @@ poll:
   scan_budget_per_run: 100     # 실행당 sitemap 백스톱 제목 스캔 개수 (일 유입 ~6-8천건을 여유 있게 소화)
   fast_detail_cap_per_run: 40  # 실행당 빠른 감지 레인 상세 파싱 상한
   buysell_budget_per_run: 120  # 실행당 중고거래 (동×키워드) 검색 횟수
-  max_alerts_per_run: 20       # 초과분은 요약 1건으로 합침
+  max_alerts_per_run: 20       # 초과분은 다음 실행으로 이월
   state_max_age_days: 90
+  photos: true                 # 알림에 매물 사진 첨부
+  price_watch_per_run: 8       # 실행당 가격 인하 재확인(부동산) 개수
+  digest_hour_kst: 8           # 아침 브리핑 발송 시각 (KST, 이 시각 이후 첫 실행에서 1회)

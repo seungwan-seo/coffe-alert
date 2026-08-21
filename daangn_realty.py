@@ -137,6 +137,9 @@ def fetch_article(article_id) -> dict | None:
     trades = [store[r] for r in art["trades"]["__refs"]] if art.get("trades") else []
     region = store[art["region"]["__ref"]] if art.get("region") else {}
     biz = store[art["bizProfile"]["__ref"]].get("name") if art.get("bizProfile") else None
+    image = None
+    if (art.get("images") or {}).get("__refs"):
+        image = store[art["images"]["__refs"][0]].get("url")
 
     return {
         "id": str(art.get("originalId") or article_id),
@@ -152,7 +155,37 @@ def fetch_article(article_id) -> dict | None:
         "manage_cost": art.get("totalManageCost"),
         "published_at": art.get("publishedAt", ""),
         "broker": biz,
+        "image": image,
     }
+
+
+def trade_snapshot(trades: list) -> dict:
+    """가격 추적용 대표 거래조건 스냅샷 (만원 단위)."""
+    if not trades:
+        return {}
+    t = next((x for x in trades if x.get("preferred")), trades[0])
+    return {
+        "type": t.get("type"),
+        "deposit": t.get("deposit"),
+        "monthlyPay": t.get("monthlyPay"),
+        "price": t.get("price"),
+    }
+
+
+def is_price_drop(old: dict, new: dict) -> bool:
+    """대표 거래조건이 같은 유형이면서 어떤 금액도 오르지 않고 하나 이상 내렸으면 True."""
+    if not old or not new or old.get("type") != new.get("type"):
+        return False
+    dropped = raised = False
+    for key in ("deposit", "monthlyPay", "price"):
+        o, n = old.get(key), new.get(key)
+        if o is None or n is None:
+            continue
+        if n < o:
+            dropped = True
+        elif n > o:
+            raised = True
+    return dropped and not raised
 
 
 def fmt_manwon(v) -> str:

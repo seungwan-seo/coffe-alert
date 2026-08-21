@@ -35,24 +35,22 @@ def esc(text: str) -> str:
     return html.escape(str(text), quote=False)
 
 
-def _post(chat_id: str, text: str) -> None:
-    resp = requests.post(
-        API.format(token=TOKEN, method="sendMessage"),
-        json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
-        timeout=30,
-    )
+def _request(method: str, payload: dict) -> None:
+    """텔레그램 API 호출 (429는 retry_after만큼 대기 후 1회 재시도)."""
+    url = API.format(token=TOKEN, method=method)
+    resp = requests.post(url, json=payload, timeout=30)
     if resp.status_code == 429:
         try:
             retry_after = resp.json().get("parameters", {}).get("retry_after", 5)
         except ValueError:
             retry_after = 5
         time.sleep(retry_after + 1)
-        resp = requests.post(
-            API.format(token=TOKEN, method="sendMessage"),
-            json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
-            timeout=30,
-        )
+        resp = requests.post(url, json=payload, timeout=30)
     resp.raise_for_status()
+
+
+def _post(chat_id: str, text: str) -> None:
+    _request("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "HTML"})
 
 
 def send(text: str) -> None:
@@ -64,3 +62,33 @@ def send(text: str) -> None:
     for chat_id in CHAT_IDS:
         _post(chat_id, text)
         time.sleep(1.1)  # 같은 채팅으로 초당 1건 제한 준수
+
+
+def _post_photo(chat_id: str, photo: str, caption: str) -> None:
+    _request("sendPhoto", {"chat_id": chat_id, "photo": photo, "caption": caption[:1024], "parse_mode": "HTML"})
+
+
+def send_alert(alert) -> None:
+    """알림 1건 전송. alert는 문자열(텍스트만) 또는 {"text": ..., "photo": url|None}.
+    사진 전송이 실패하면 텍스트로 폴백한다."""
+    if isinstance(alert, str):
+        send(alert)
+        return
+    text = alert.get("text", "")
+    photo = alert.get("photo")
+    if dry_run():
+        print("[DRY-RUN] " + ("📷 " if photo else "") + text.replace("\n", " | "))
+        return
+    for chat_id in CHAT_IDS:
+        if photo:
+            try:
+                _post_photo(chat_id, photo, text)
+            except requests.HTTPError as e:
+                status = e.response.status_code if e.response is not None else 0
+                if 400 <= status < 500 and status != 429:
+                    _post(chat_id, text)   # 사진 URL 거부 등 결정적 실패만 텍스트 폴백
+                else:
+                    raise                  # 일시적 오류는 outbox 재시도로 (사진 유지)
+        else:
+            _post(chat_id, text)
+        time.sleep(1.1)

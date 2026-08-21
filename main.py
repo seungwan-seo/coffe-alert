@@ -12,10 +12,12 @@ import os
 import sys
 import time
 import traceback
+from datetime import datetime, timedelta, timezone
 
 import requests
 import yaml
 
+import commands
 import daangn_buysell
 import daangn_realty
 import matching
@@ -23,6 +25,13 @@ import notifier
 from state import is_seen, load_state, mark_seen, save_state
 
 HERE = os.path.dirname(__file__)
+KST = timezone(timedelta(hours=9))
+
+
+def add_alert(state: dict, alerts: list, channel: str, text: str, photo=None) -> None:
+    alerts.append({"text": text, "photo": photo})
+    stats = state.setdefault("stats", {})
+    stats[channel] = stats.get(channel, 0) + 1
 
 
 def load_config() -> dict:
@@ -84,7 +93,15 @@ def run_realty(cfg: dict, state: dict, alerts: list, now: float) -> None:
             return
         rule = matching.match_realty(cfg, listing)
         if rule:
-            alerts.append(realty_alert_text(listing, rule))
+            add_alert(state, alerts, "realty", realty_alert_text(listing, rule),
+                      photo=listing.get("image") if poll.get("photos", True) else None)
+            # 가격 인하 추적 대상으로 등록
+            state["realty_watch"][listing["id"]] = {
+                "trade": daangn_realty.trade_snapshot(listing["trades"]),
+                "ts": time.time(),
+                "url": listing["url"],
+                "label": f"[{listing['category']}] {listing['region']}",
+            }
 
     # 레인 1: 서울 25개 구 카테고리 페이지 (빠른 감지)
     if now - state["last_fast_lane"] >= poll["fast_lane_interval_min"] * 60:
@@ -111,7 +128,7 @@ def run_realty(cfg: dict, state: dict, alerts: list, now: float) -> None:
                         process(article_id)
                     except requests.RequestException as e:
                         print(f"[realty/fast] {article_id} 요청 실패, 다음 실행에 재시도: {e}")
-                    except (ValueError, KeyError) as e:
+                    except (ValueError, KeyError, TypeError, AttributeError) as e:
                         mark_seen(state, "realty", article_id)  # 결정적 파싱 실패 — 재시도 무의미
                         print(f"[realty/fast] {article_id} 파싱 실패, 건너뜀: {e}")
         except daangn_realty.Blocked as e:
@@ -156,10 +173,44 @@ def run_realty(cfg: dict, state: dict, alerts: list, now: float) -> None:
         except requests.RequestException as e:
             print(f"[realty/scan] {article_id} 요청 실패, 다음 실행에 재시도: {e}")
             break
-        except (ValueError, KeyError) as e:
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
             mark_seen(state, "realty", article_id)  # 결정적 파싱 실패 — 큐 교착 방지
             print(f"[realty/scan] {article_id} 파싱 실패, 건너뜀: {e}")
         state["realty_pending"].pop(0)
+
+    # 레인 3: 알림했던 매물의 가격 인하 감지 (회전 재확인)
+    watch_ids = sorted(state["realty_watch"], key=lambda k: state["realty_watch"][k]["ts"], reverse=True)
+    if watch_ids:
+        checked = 0
+        cursor = state["watch_cursor"]
+        while checked < poll.get("price_watch_per_run", 8) and checked < len(watch_ids):
+            article_id = watch_ids[cursor % len(watch_ids)]
+            cursor += 1
+            checked += 1
+            entry = state["realty_watch"][article_id]
+            try:
+                listing = daangn_realty.fetch_article(article_id)
+                time.sleep(poll["realty_delay_sec"])
+            except daangn_realty.Blocked as e:
+                print(f"[realty/watch] 차단 감지, 이번 실행 중단: {e}")
+                break
+            except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError) as e:
+                print(f"[realty/watch] {article_id} 확인 실패: {e}")
+                continue
+            if listing is None:   # 삭제/거래완료 — 추적 종료
+                state["realty_watch"].pop(article_id, None)
+                continue
+            new_snap = daangn_realty.trade_snapshot(listing["trades"])
+            if daangn_realty.is_price_drop(entry["trade"], new_snap):
+                add_alert(state, alerts, "drop",
+                          "\n".join([
+                              f"💰 <b>가격 인하!</b> {notifier.esc(entry['label'])}",
+                              f"{notifier.esc(daangn_realty.fmt_trade([entry['trade']]))} → <b>{notifier.esc(daangn_realty.fmt_trade([new_snap]))}</b>",
+                              entry["url"],
+                          ]))
+            if new_snap != entry["trade"]:
+                entry["trade"] = new_snap   # 변동 반영 (같은 값으로 반복 알림 방지)
+        state["watch_cursor"] = cursor % max(len(watch_ids), 1)
     if scanned:
         print(f"[realty/scan] 제목 스캔 {scanned}건 (대기 {len(state['realty_pending'])}건 남음)")
 
@@ -181,11 +232,28 @@ def run_buysell(cfg: dict, state: dict, alerts: list, regions: list) -> None:
             daangn_buysell.polite_sleep(poll["buysell_delay_sec"])
             for item in items:
                 if is_seen(state, "buysell", item["id"]):
+                    # 이미 알림한 매물이 다시 보이면 가격 인하만 확인 (추가 요청 없음)
+                    # 판매중 상태에서만 기준가를 비교·갱신 (예약중 가격 변동으로 인하 알림이 묻히는 것 방지)
+                    watch = state["buysell_watch"].get(str(item["id"]))
+                    if watch and item.get("price") is not None and watch.get("price") is not None \
+                            and item.get("status") == "Ongoing" and item["price"] != watch["price"]:
+                        if item["price"] < watch["price"]:
+                            add_alert(state, alerts, "drop", "\n".join([
+                                f"💰 <b>가격 인하!</b> {notifier.esc(watch['title'])}",
+                                f"{notifier.esc(daangn_buysell.fmt_price(watch['price']))} → <b>{notifier.esc(daangn_buysell.fmt_price(item['price']))}</b>",
+                                watch["url"],
+                            ]))
+                        watch["price"] = item["price"]
                     continue
                 verdict = matching.match_buysell(search_cfg, item, cfg["buysell"]["freshness_days"])
                 if verdict == "match":
                     mark_seen(state, "buysell", item["id"])
-                    alerts.append(buysell_alert_text(item, search_cfg["keyword"]))
+                    add_alert(state, alerts, "buysell", buysell_alert_text(item, search_cfg["keyword"]),
+                              photo=item.get("thumbnail") if poll.get("photos", True) else None)
+                    state["buysell_watch"][str(item["id"])] = {
+                        "price": item.get("price"), "ts": time.time(),
+                        "url": item["url"], "title": item["title"][:60],
+                    }
                     found += 1
                 elif verdict == "perm":
                     mark_seen(state, "buysell", item["id"])
@@ -212,6 +280,14 @@ def main() -> None:
     alerts: list = []
     now = time.time()
 
+    # 명령어 처리 (/help, /rules) — 응답은 이번 실행에서 같이 나감
+    command_replies: list = []
+    if not args.dry_run:
+        try:
+            command_replies = commands.poll_commands(cfg, state)
+        except Exception:
+            traceback.print_exc()
+
     # 채널 격리: 한 채널의 예기치 못한 오류가 다른 채널과 상태 저장을 막지 않게 한다
     if cfg["realty"]["enabled"]:
         try:
@@ -226,28 +302,42 @@ def main() -> None:
             traceback.print_exc()
             print("[buysell] 예기치 못한 오류 — 이번 실행의 중고거래 채널을 건너뜁니다.")
 
+    # 아침 요약: KST 기준 매일 digest_hour 이후 첫 실행에서 1회
+    now_kst = datetime.now(KST)
+    today = now_kst.strftime("%Y-%m-%d")
+    if now_kst.hour >= cfg["poll"].get("digest_hour_kst", 8) and state.get("last_digest_day") != today:
+        s = state.get("stats", {})
+        command_replies.append("\n".join([
+            f"🌅 <b>아침 브리핑</b> ({today})",
+            f"지난 요약 이후 알림: 🏠 매물 {s.get('realty', 0)}건 · 🛠 장비 {s.get('buysell', 0)}건 · 💰 가격 인하 {s.get('drop', 0)}건",
+            f"가격 추적 중인 매물 {len(state.get('realty_watch', {})) + len(state.get('buysell_watch', {}))}건 · 오늘도 좋은 자리 잡읍시다 ☕🫘",
+        ]))
+        state["stats"] = {}
+        state["last_digest_day"] = today
+
     cap = cfg["poll"]["max_alerts_per_run"]
     to_send = alerts[:cap]
     overflow = alerts[cap:]   # 상한 초과분은 버리지 않고 outbox로 넘겨 다음 실행에서 이어 보냄
     if overflow:
         to_send.append(f"…그 외 {len(overflow)}건은 다음 실행에서 이어서 보냅니다")
-    # 지난 실행에서 못 보낸 알림(outbox)을 먼저 재시도
-    queue = state.get("outbox", [])[:cap] + to_send
+    # 명령 응답/브리핑은 상한과 무관하게 먼저, 그다음 지난 실행에서 못 보낸 알림(outbox) 재시도
+    queue = command_replies + state.get("outbox", [])[:cap] + to_send
     failed = []
     if not args.dry_run and notifier.dry_run() and queue:
         print(f"[알림] 텔레그램 토큰 미설정 — {len(queue)}건을 아웃박스에 보관합니다 (토큰 연결 후 첫 실행에서 전송)")
-    for text in queue:
+    for alert in queue:
+        text = alert if isinstance(alert, str) else alert.get("text", "")
         if args.dry_run:
             print("[DRY-RUN]\n" + text + "\n")
             continue
         if notifier.dry_run():
-            failed.append(text)   # 토큰 미설정 — 유실 방지를 위해 보관
+            failed.append(alert)   # 토큰 미설정 — 유실 방지를 위해 보관
             continue
         try:
-            notifier.send(text)
+            notifier.send_alert(alert)
         except Exception as e:
             print(f"[전송 실패, 다음 실행에 재시도] {e}")
-            failed.append(text)
+            failed.append(alert)
     # 재시도 대상: 이번에 전송 실패한 것 + 상한 초과분 + 이번에 순번이 안 온 기존 outbox
     state["outbox"] = (failed + overflow + state.get("outbox", [])[cap:])[:100]
 

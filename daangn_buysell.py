@@ -53,6 +53,7 @@ def search(keyword: str, region_id: int) -> list:
             "title": a.get("title") or "",
             "content": a.get("content") or "",
             "price": price,
+            "thumbnail": a.get("thumbnail"),
             "status": a.get("status"),
             "region": (a.get("region") or {}).get("name", ""),
             "created_at": a.get("createdAt", ""),
