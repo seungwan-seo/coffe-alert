@@ -2,10 +2,9 @@ name: crawler
 
 on:
   schedule:
-    # GitHub 무료 cron은 지연/드롭이 심해서 5분 간격으로 이중 등록 (concurrency가 겹침 방지).
-    # 실제 발동은 여전히 들쭉날쭉하지만 체감 주기가 짧아진다.
+    # cron은 하나만 등록할 것. 2중 등록했더니 두 실행이 같은 시점의 저장소를 체크아웃해
+    # 같은 매물을 두 번 알리는 중복이 발생했다 (2026-08-21).
     - cron: "3-53/10 * * * *"   # UTC, 매시 :03 :13 … — 정각 혼잡 시간대 회피
-    - cron: "8-58/10 * * * *"   # 매시 :08 :18 …
   workflow_dispatch: {}          # 수동 실행 (테스트/60일 비활성화 복구용)
 
 # 이전 실행이 안 끝났으면 새 실행은 대기. 밀린 틱은 1개만 유지되므로 큐가 쌓이지 않음.
@@ -21,7 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15          # 최악 실행시간(요청 대기 합산 ~5분 + 왕복 지연)에 여유를 둠
     steps:
+      # 트리거 시점의 커밋이 아니라 항상 최신 main을 받는다.
+      # 실행이 대기열에 밀렸을 때 낡은 상태 파일로 시작해 중복 알림이 나가는 것을 막는다.
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - uses: actions/setup-python@v5
         with:
