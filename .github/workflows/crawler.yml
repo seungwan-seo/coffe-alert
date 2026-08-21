@@ -1,0 +1,48 @@
+name: crawler
+
+on:
+  schedule:
+    - cron: "3-53/10 * * * *"   # UTC, 매시 :03 :13 … — 정각 혼잡 시간대 회피
+  workflow_dispatch: {}          # 수동 실행 (테스트/60일 비활성화 복구용)
+
+# 이전 실행이 안 끝났으면 새 실행은 대기. 밀린 틱은 1개만 유지되므로 큐가 쌓이지 않음.
+concurrency:
+  group: crawler
+  cancel-in-progress: false
+
+permissions:
+  contents: write                # 상태 파일 커밋용
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15          # 최악 실행시간(요청 대기 합산 ~5분 + 왕복 지연)에 여유를 둠
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Run crawler
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python main.py
+
+      - name: Commit state
+        if: always()             # 크롤러 스텝이 실패해도 디스크에 저장된 상태는 커밋
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/seen.json
+          if ! git diff --cached --quiet; then
+            git commit -m "업데이트"
+            for i in 1 2 3; do
+              git pull --rebase origin "$GITHUB_REF_NAME" && git push && break
+              sleep 5
+            done
+          fi

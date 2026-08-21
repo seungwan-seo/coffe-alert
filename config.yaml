@@ -1,0 +1,53 @@
+# 당근 매물 알림 설정
+# 키워드는 본문(부동산) / 제목+본문(중고거래)에서 부분 일치로 검사한다.
+
+realty:
+  enabled: true
+  freshness_days: 7   # 등록된 지 이 일수 넘은 매물은 알리지 않음 (큐레이션 변동으로 옛 매물이 갑자기 노출되는 경우 방지)
+  # 주소가 이 문자열로 시작하면 통과 (예: "서울특별시", "경기도 성남시")
+  regions:
+    - "서울특별시"
+  # 빠른 감지 레인이 폴링할 카테고리 페이지 (서울 25개 구 × 카테고리 수만큼 요청)
+  fast_categories: ["상가"]
+  # 규칙 중 하나라도 맞으면 알림. categories가 빈 리스트면 매물 종류 무관.
+  # 매물 종류: 원룸 빌라 아파트 오피스텔 상가 사무실 건물 토지
+  rules:
+    - name: "무인 매장"
+      categories: []
+      keywords: ["무인"]
+      exclude_keywords: ["무인택배", "무인 택배", "무인세탁", "무인 세탁", "무인경비", "무인 경비"]
+    - name: "카페/양도 (상가)"
+      categories: ["상가"]
+      keywords: ["카페", "커피", "양도", "권리금", "인수"]
+      exclude_keywords: []
+  # true면 규칙 무시하고 지역만으로 전부 알림 — 알림량 확인용 스위치
+  unfiltered: false
+
+buysell:
+  enabled: true
+  freshness_days: 3   # 등록된 지 이 일수 넘은 매물은 알리지 않음 (첫 순회 폭주 방지)
+  # 검색어별로 서울 전체 동을 회전 순회하며 폴링. min_price(원) 미만은 노이즈로 버림.
+  searches:
+    - keyword: "무인카페"
+      min_price: 0
+    - keyword: "카페 양도"
+      min_price: 500000    # 이용권/굿즈 '양도' 노이즈 차단 — 진짜 가게 양도는 수백만원대
+    - keyword: "무인 매장"
+      min_price: 100000    # 할인쿠폰 등 소액 노이즈 차단
+    - keyword: "커피머신"
+      min_price: 500000
+    - keyword: "키오스크"
+      min_price: 300000
+    - keyword: "제빙기"
+      min_price: 300000
+
+poll:
+  realty_delay_sec: 1.2        # 부동산 요청 간 대기
+  buysell_delay_sec: 0.5       # 중고거래 요청 간 대기
+  fast_lane_interval_min: 25   # 구별 카테고리 페이지 폴링 주기 (CDN 캐시가 1시간이라 더 짧게는 무의미)
+  sitemap_interval_hours: 4    # sitemap 백스톱 확인 주기 (하루 1회만 재생성됨)
+  scan_budget_per_run: 100     # 실행당 sitemap 백스톱 제목 스캔 개수 (일 유입 ~6-8천건을 여유 있게 소화)
+  fast_detail_cap_per_run: 40  # 실행당 빠른 감지 레인 상세 파싱 상한
+  buysell_budget_per_run: 120  # 실행당 중고거래 (동×키워드) 검색 횟수
+  max_alerts_per_run: 20       # 초과분은 요약 1건으로 합침
+  state_max_age_days: 90
