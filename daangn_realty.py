@@ -25,6 +25,7 @@ CATEGORY_KO = {
     "SPLIT_ONE_ROOM": "원룸", "OPEN_ONE_ROOM": "원룸", "TWO_ROOM": "빌라",
     "APART": "아파트", "OFFICETEL": "오피스텔", "STORE": "상가",
     "OFFICE": "사무실", "LAND": "토지", "BUILDING": "건물",
+    "HOUSE": "주택",   # 실측으로 뒤늦게 발견한 값 (2026-08-21)
 }
 
 TRADE_KO = {"MONTH": "월세", "BORROW": "전세", "BUY": "매매", "SHORT": "단기"}
