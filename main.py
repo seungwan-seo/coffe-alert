@@ -280,11 +280,12 @@ def main() -> None:
     alerts: list = []
     now = time.time()
 
-    # 명령어 처리 (/help, /rules) — 응답은 이번 실행에서 같이 나감
+    # 봇에게 온 메시지는 소비만 하고 응답하지 않는다 (명령어 기능 제거 — 상주 서버가 아니라
+    # 응답이 최대 수십 분 늦어 실용성이 없었음). 조건 안내는 그룹 공지로 대체.
     command_replies: list = []
     if not args.dry_run:
         try:
-            command_replies = commands.poll_commands(cfg, state)
+            commands.drain_updates(state)
         except Exception:
             traceback.print_exc()
 
