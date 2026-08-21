@@ -7,7 +7,7 @@ import requests
 
 import notifier
 
-DELAY_NOTE = "⏱ 무료 서버 특성상 명령 응답은 봇이 깨어나는 다음 실행 때(최대 10분 뒤) 와요."
+DELAY_NOTE = "⏱ 무료 서버 특성상 명령 응답은 봇이 깨어나는 다음 실행 때 와요 (보통 10분 내외, 서버 사정에 따라 수십 분까지 밀릴 수 있음)."
 
 
 def help_text() -> str:
