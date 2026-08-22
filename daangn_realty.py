@@ -8,7 +8,7 @@
 import json
 import re
 import time
-from urllib.parse import quote
+from urllib.parse import quote  # noqa: F401  (article_url·fast_lane_ids 양쪽에서 사용)
 
 import requests
 
@@ -110,16 +110,26 @@ def fetch_title(article_id) -> str | None:
         resp.close()
 
 
-def article_url(article_id, lat=None, lon=None) -> str:
-    """매물 URL. 좌표가 있으면 mv(지도 뷰포트) 파라미터를 붙여 지도가 해당 위치를 잡게 한다.
-    mv=남서위도,남서경도,북동위도,북동경도,줌 — 붙이지 않으면 지도가 엉뚱한 곳을 보여준다."""
-    url = f"{BASE}/articles/{article_id}"
+def article_url(article_id, lat=None, lon=None, sales_type=None, trade_type=None) -> str:
+    """매물 URL.
+    - af: 지도 필터(매물종류/거래유형). 없으면 지도가 기본값(아파트)을 보여줘서
+          정작 이 상가 매물은 지도에 안 찍힌다.
+    - mv: 지도 뷰포트(남서위도,남서경도,북동위도,북동경도,줌).
+    둘 다 실제 당근 웹이 생성하는 링크에서 관측한 형식이다."""
+    params = []
+    if sales_type:
+        af = {"salesTypes": [sales_type]}
+        if trade_type:
+            af["tradeTypes"] = [trade_type]
+        params.append("af=" + quote(json.dumps(af, separators=(",", ":"))))
     try:
         la, lo = float(lat), float(lon)
+        dla, dlo = 0.0022, 0.0051   # 줌 17 기준 뷰포트 크기
+        params.append(f"mv={la - dla:.5f}%2C{lo - dlo:.5f}%2C{la + dla:.5f}%2C{lo + dlo:.5f}%2C17")
     except (TypeError, ValueError):
-        return url
-    dla, dlo = 0.0022, 0.0051   # 실제 웹 링크에서 관측한 뷰포트 크기 (줌 17 기준)
-    return f"{url}?mv={la - dla:.5f}%2C{lo - dlo:.5f}%2C{la + dla:.5f}%2C{lo + dlo:.5f}%2C17"
+        pass
+    url = f"{BASE}/articles/{article_id}"
+    return url + ("?" + "&".join(params) if params else "")
 
 
 def _parse_relay(html: str) -> dict:
@@ -157,9 +167,10 @@ def fetch_article(article_id) -> dict | None:
     coord = store[art["publicCoordinate"]["__ref"]] if art.get("publicCoordinate") else {}
     lat, lon = coord.get("lat"), coord.get("lon")
 
+    preferred = next((t for t in trades if t.get("preferred")), trades[0] if trades else {})
     return {
         "id": str(art.get("originalId") or article_id),
-        "url": article_url(article_id, lat, lon),
+        "url": article_url(article_id, lat, lon, sales_type, preferred.get("type")),
         "category": CATEGORY_KO.get(sales_type, sales_type),
         "trades": trades,
         "address": art.get("publicAddress") or art.get("address") or "",
