@@ -147,6 +147,9 @@ def match_buysell(search_cfg: dict, item: dict, freshness_days: float = 3) -> st
     # 당근 검색은 키워드 없는 연관 상품도 섞어 준다 — 키워드(또는 별칭) 토큰이
     # 제목/본문에 실제로 있어야 알림. aliases로 표기 변형(커피 머신/에스프레소 머신 등)을 인정한다.
     text = f"{item.get('title') or ''} {item.get('content') or ''}"
+    # 제외어가 있으면 그 부분을 지우고 판정한다 ("만화카페 폐업" 같은 다른 업종 걸러내기)
+    for phrase in search_cfg.get("exclude_keywords") or []:
+        text = text.replace(phrase, "")
     phrases = [search_cfg["keyword"]] + (search_cfg.get("aliases") or [])
     for phrase in phrases:
         tokens = phrase.split()
