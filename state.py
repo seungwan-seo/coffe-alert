@@ -27,6 +27,7 @@ DEFAULT = {
     "buysell_watch": {},        # 알림된 장비 가격 추적: {id: {"price": int, "ts": ..., "title": ..., "url": ...}}
     "watch_cursor": 0,          # 가격 재확인 순회 위치
     "stats": {},                # 아침 요약용 카운터: {"realty": n, "buysell": n, "drop": n}
+    "drop_log": [],             # 아침 브리핑에 링크로 실을 가격 인하 내역 (발송 후 비움)
     "last_digest_day": "",      # 마지막 아침 요약을 보낸 날짜 (KST, YYYY-MM-DD)
 }
 

@@ -36,6 +36,13 @@ def add_alert(state: dict, alerts: list, channel: str, text: str, photo=None) ->
     stats[channel] = stats.get(channel, 0) + 1
 
 
+def record_drop(state: dict, label: str, before: str, after: str, url: str) -> None:
+    """아침 브리핑에 링크로 싣기 위해 가격 인하 내역을 남긴다."""
+    log = state.setdefault("drop_log", [])
+    log.append({"label": label[:50], "before": before, "after": after, "url": url})
+    del log[:-30]   # 최근 30건만 유지
+
+
 def load_config() -> dict:
     with open(os.path.join(HERE, "config.yaml"), encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -204,12 +211,15 @@ def run_realty(cfg: dict, state: dict, alerts: list, now: float) -> None:
                 continue
             new_snap = daangn_realty.trade_snapshot(listing["trades"])
             if daangn_realty.is_price_drop(entry["trade"], new_snap):
+                before = daangn_realty.fmt_trade([entry["trade"]])
+                after = daangn_realty.fmt_trade([new_snap])
                 add_alert(state, alerts, "drop",
                           "\n".join([
                               f"💰 <b>가격 인하!</b> {notifier.esc(entry['label'])}",
-                              f"{notifier.esc(daangn_realty.fmt_trade([entry['trade']]))} → <b>{notifier.esc(daangn_realty.fmt_trade([new_snap]))}</b>",
+                              f"{notifier.esc(before)} → <b>{notifier.esc(after)}</b>",
                               entry["url"],
                           ]))
+                record_drop(state, entry["label"], before, after, entry["url"])
             if new_snap != entry["trade"]:
                 entry["trade"] = new_snap   # 변동 반영 (같은 값으로 반복 알림 방지)
         state["watch_cursor"] = cursor % max(len(watch_ids), 1)
@@ -240,11 +250,14 @@ def run_buysell(cfg: dict, state: dict, alerts: list, regions: list) -> None:
                     if watch and item.get("price") is not None and watch.get("price") is not None \
                             and item.get("status") == "Ongoing" and item["price"] != watch["price"]:
                         if item["price"] < watch["price"]:
+                            before = daangn_buysell.fmt_price(watch["price"])
+                            after = daangn_buysell.fmt_price(item["price"])
                             add_alert(state, alerts, "drop", "\n".join([
                                 f"💰 <b>가격 인하!</b> {notifier.esc(watch['title'])}",
-                                f"{notifier.esc(daangn_buysell.fmt_price(watch['price']))} → <b>{notifier.esc(daangn_buysell.fmt_price(item['price']))}</b>",
+                                f"{notifier.esc(before)} → <b>{notifier.esc(after)}</b>",
                                 watch["url"],
                             ]))
+                            record_drop(state, watch["title"], before, after, watch["url"])
                         watch["price"] = item["price"]
                     continue
                 verdict = matching.match_buysell(search_cfg, item, cfg["buysell"]["freshness_days"])
@@ -459,12 +472,30 @@ def main() -> None:
     today = now_kst.strftime("%Y-%m-%d")
     if now_kst.hour >= cfg["poll"].get("digest_hour_kst", 8) and state.get("last_digest_day") != today:
         s = state.get("stats", {})
-        command_replies.append("\n".join([
+        lines = [
             f"🌅 <b>아침 브리핑</b> ({today})",
-            f"지난 요약 이후 알림: 🏠 매물 {s.get('realty', 0)}건 · 🛠 장비 {s.get('buysell', 0)}건 · 💰 가격 인하 {s.get('drop', 0)}건",
-            f"가격 추적 중인 매물 {len(state.get('realty_watch', {})) + len(state.get('buysell_watch', {}))}건 · 오늘도 좋은 자리 잡읍시다 ☕🫘",
-        ]))
+            f"지난 요약 이후 알림: 🏠 매물 {s.get('realty', 0)}건 · 🏪 점포라인 {s.get('jumpoline', 0)}건 "
+            f"· 🛠 장비 {s.get('buysell', 0)}건 · 💰 가격 인하 {s.get('drop', 0)}건",
+        ]
+        drops = state.get("drop_log", [])
+        if drops:
+            lines.append("")
+            lines.append("💰 <b>가격 내려간 매물</b>")
+            for d in drops[:10]:
+                lines.append(
+                    f'· <a href="{d["url"]}">{notifier.esc(d["label"])}</a> — '
+                    f'{notifier.esc(d["before"])} → <b>{notifier.esc(d["after"])}</b>'
+                )
+            if len(drops) > 10:
+                lines.append(f"…그 외 {len(drops) - 10}건")
+        lines.append("")
+        lines.append(
+            f"가격 추적 중인 매물 {len(state.get('realty_watch', {})) + len(state.get('buysell_watch', {}))}건 "
+            f"· 오늘도 좋은 자리 잡읍시다 ☕🫘"
+        )
+        command_replies.append("\n".join(lines))
         state["stats"] = {}
+        state["drop_log"] = []
         state["last_digest_day"] = today
 
     cap = cfg["poll"]["max_alerts_per_run"]

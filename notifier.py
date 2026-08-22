@@ -50,7 +50,11 @@ def _request(method: str, payload: dict) -> None:
 
 
 def _post(chat_id: str, text: str) -> None:
-    _request("sendMessage", {"chat_id": chat_id, "text": text, "parse_mode": "HTML"})
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+    # 링크가 여러 개인 메시지(브리핑 등)는 미리보기를 끈다 — 안 그러면 첫 링크 카드가 크게 붙는다
+    if text.count("http") > 1:
+        payload["link_preview_options"] = {"is_disabled": True}
+    _request("sendMessage", payload)
 
 
 def send(text: str) -> None:
