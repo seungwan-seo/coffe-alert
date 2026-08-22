@@ -56,8 +56,37 @@ buysell:
     - keyword: "키오스크"
       min_price: 300000
 
+# 번개장터 중고 장비 (공개 JSON API, 최신순)
+bunjang:
+  enabled: true
+  freshness_days: 3
+  include_no_region: true   # 지역 미표기 매물도 알림 (번개는 절반 가까이가 미표기 — 택배 거래 많음)
+  regions: ["서울"]
+  searches:
+    - keyword: "제빙기"
+      min_price: 300000
+      aliases: ["아이스메이커", "아이스 메이커"]
+    - keyword: "커피머신"
+      min_price: 500000
+      aliases: ["커피 머신", "에스프레소 머신", "에스프레소머신", "커피 기계", "커피기계"]
+    - keyword: "무인카페"
+      min_price: 1000000
+      aliases: ["무인 카페"]
+    - keyword: "키오스크"
+      min_price: 300000
+
+# 점포라인 서울 카페 양도 매물 (m.jumpoline.com, 최신 100건 고정)
+jumpoline:
+  enabled: true
+  interval_min: 60          # 상업 사이트라 넉넉히
+  detail_cap_per_run: 6     # 실행당 상세 조회 상한
+  max_premium_manwon: 5000  # 권리금 상한(만원). STRATEGY 기준 0~300 선호, 여유 두고 5천만원
+  keywords: []              # 비우면 카페 카테고리 전체. 예: ["무인", "테이크아웃"]
+
 poll:
   realty_delay_sec: 1.2        # 부동산 요청 간 대기
+  bunjang_delay_sec: 1.0       # 번개장터 요청 간 대기
+  jumpoline_delay_sec: 2.0     # 점포라인 요청 간 대기 (상업 사이트, 보수적으로)
   buysell_delay_sec: 0.5       # 중고거래 요청 간 대기
   fast_lane_interval_min: 25   # 구별 카테고리 페이지 폴링 주기 (CDN 캐시가 1시간이라 더 짧게는 무의미)
   sitemap_interval_hours: 4    # sitemap 백스톱 확인 주기 (하루 1회만 재생성됨)

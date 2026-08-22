@@ -24,9 +24,19 @@
 - 파싱 로직은 전부 2026-08 실측 기반 — 사이트 구조 변경으로 깨지면 실제 응답을 다시 실측해서 고칠 것 (추측으로 수정 금지)
 - `poll.*_delay_sec`를 줄이는 변경은 차단 리스크 — 사용자 확인 없이 하지 말 것
 
+## 데이터 소스 4종
+| 채널 | 소스 | 얻는 것 |
+|---|---|---|
+| 🏠 부동산 | realty.daangn.com | 서울 상가 신규 (카페/커피·무인) |
+| 🛠 중고거래 | daangn 중고거래 | 서울 동네별 장비 |
+| 🛠 번개 | api.bunjang.co.kr (공개 JSON) | 전국 최신순 장비 |
+| 🏪 점포라인 | m.jumpoline.com | 서울 카페 **양도** 매물 + 권리금·창업비용·인테리어비 |
+
 ## 실측으로 확정된 사실 (2026-08, 코드가 의존하는 것들)
 - 부동산 상세: `window.RELAY_STORE` 이중 인코딩 JSON. 금액은 **만원 단위**. 404 = 삭제/거래완료. 사용자 제목 필드 없음(본문 `content`뿐)
 - 부동산 열거: 구 단위 카테고리 페이지(`/map/서울특별시/{구}/{카테고리}`) SSR 20건 + `sitemap-articles/1`(ID 내림차순, 하루 1회 재생성). 시 단위 카테고리 페이지는 404. CDN 캐시 1시간
 - 중고거래: `?in={동id}&search={kw}&_data=routes/kr.buy-sell._index` JSON. **동 단위만 검색됨**(시/구 id는 대표 동으로 폴백). UA 헤더 필수. HTTP/2 금지(requests는 1.1이라 OK). 페이지네이션 없음
 - 서울 행정동 id: 저번호 대역(3~460), `seoul_regions.json`에 399개 수집됨
 - GitHub Actions: public 저장소여야 무료 무제한. 상태는 `state/seen.json` 커밋 방식
+- **번개장터**: `api.bunjang.co.kr/api/1/find_v2.json?q=&order=date&n=` 인증 불필요. `status "0"`=판매중. 지역 파라미터 무시됨 → `location` 문자열로 필터. 절반 가까이 지역 미표기
+- **점포라인**: PC 사이트는 매물이 CSR이라 못 씀. **모바일 `m.jumpoline.com/jumpo_list_ajax.asp?s=jp&MCode=B&SCode=14&tabs=1&c1=11000`**(EUC-KR)이 서울 카페 100건을 SSR로 준다. 페이지네이션 없음(최신 100건 고정). 상세 `jumpo_view.asp?s=&WebJOfrsID=`는 dt/dd 쌍으로 창업비용·총인테리어·월수익·주소 제공. **보증금·월세는 목록·상세 어디에도 정형 필드로 없음**. 상업 사이트라 요청 간격 보수적으로(기본 60분 주기)

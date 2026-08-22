@@ -17,6 +17,12 @@ DEFAULT = {
     "buysell_cursor": 0,        # (동×키워드) 순회 위치
     "outbox": [],               # 전송 실패한 알림 — 다음 실행에서 재시도
     "tg_offset": 0,             # getUpdates 오프셋 (명령어 처리)
+    "bunjang_seen": {},         # {bj{pid}: unix_ts}
+    "bunjang_cursor": 0,        # 검색어 회전 위치
+    "bunjang_baselined": False,
+    "jumpoline_seen": {},       # {jp{id}: unix_ts}
+    "jumpoline_baselined": False,
+    "last_jumpoline": 0.0,
     "realty_watch": {},         # 알림된 부동산 매물 가격 추적: {id: {"trade": {...}, "ts": ..., "url": ...}}
     "buysell_watch": {},        # 알림된 장비 가격 추적: {id: {"price": int, "ts": ..., "title": ..., "url": ...}}
     "watch_cursor": 0,          # 가격 재확인 순회 위치
@@ -37,8 +43,8 @@ def load_state() -> dict:
 
 def save_state(state: dict, max_age_days: int = 90) -> None:
     cutoff = time.time() - max_age_days * 86400
-    for key in ("realty_seen", "buysell_seen"):
-        state[key] = {k: v for k, v in state[key].items() if v >= cutoff}
+    for key in ("realty_seen", "buysell_seen", "bunjang_seen", "jumpoline_seen"):
+        state[key] = {k: v for k, v in state.get(key, {}).items() if v >= cutoff}
     state["realty_pending"] = state["realty_pending"][:PENDING_CAP]
     # 가격 추적은 최근 등록순으로 상한 유지 (30일 지난 항목은 정리)
     watch_cutoff = time.time() - 30 * 86400

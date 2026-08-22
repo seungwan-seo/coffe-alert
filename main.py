@@ -17,9 +17,11 @@ from datetime import datetime, timedelta, timezone
 import requests
 import yaml
 
+import bunjang
 import commands
 import daangn_buysell
 import daangn_realty
+import jumpoline
 import matching
 import notifier
 from state import is_seen, load_state, mark_seen, save_state
@@ -71,10 +73,10 @@ def realty_alert_text(listing: dict, rule: str) -> str:
     return "\n".join(parts)
 
 
-def buysell_alert_text(item: dict, keyword: str) -> str:
+def buysell_alert_text(item: dict, keyword: str, source: str = "당근") -> str:
     e = notifier.esc
     return "\n".join([
-        f"🛠 <b>[{e(keyword)}]</b> {e(item['title'])}",
+        f"🛠 <b>[{e(source)} · {e(keyword)}]</b> {e(item['title'])}",
         f"{e(daangn_buysell.fmt_price(item['price']))} · {e(item['region'] or '지역미상')}",
         item["url"],
     ])
@@ -267,6 +269,143 @@ def run_buysell(cfg: dict, state: dict, alerts: list, regions: list) -> None:
     print(f"[buysell] 순회 위치 {cursor}/{pairs_total}, 신규 알림 {found}건")
 
 
+def run_bunjang(cfg: dict, state: dict, alerts: list) -> None:
+    """번개장터 중고 장비 — 검색어를 회전시키며 최신순으로 훑는다."""
+    b = cfg["bunjang"]
+    searches = b["searches"]
+    if not searches:
+        return
+    cursor = state["bunjang_cursor"] % len(searches)
+    found = 0
+    # 첫 실행은 현재 검색 결과 전체를 기준점으로만 기록 (폭주 방지)
+    baseline = not state.get("bunjang_baselined")
+    try:
+        for _ in range(len(searches)):
+            search_cfg = searches[cursor]
+            items = bunjang.search(search_cfg["keyword"], limit=100)
+            cursor = (cursor + 1) % len(searches)
+            bunjang.polite_sleep(cfg["poll"]["bunjang_delay_sec"])
+            if baseline:
+                for item in items:
+                    mark_seen(state, "bunjang", item["id"])
+                continue
+            for item in items:
+                if is_seen(state, "bunjang", item["id"]):
+                    continue
+                region = item["region"]
+                if region:
+                    if b["regions"] and not any(r in region for r in b["regions"]):
+                        mark_seen(state, "bunjang", item["id"])   # 타 지역은 되돌아올 일 없음
+                        continue
+                elif not b.get("include_no_region", True):
+                    mark_seen(state, "bunjang", item["id"])
+                    continue
+                verdict = matching.match_buysell(search_cfg, item, b["freshness_days"])
+                if verdict == "match":
+                    mark_seen(state, "bunjang", item["id"])
+                    add_alert(state, alerts, "buysell",
+                              buysell_alert_text(item, search_cfg["keyword"], source="번개"),
+                              photo=item.get("thumbnail") if cfg["poll"].get("photos", True) else None)
+                    found += 1
+                elif verdict == "perm":
+                    mark_seen(state, "bunjang", item["id"])
+    except bunjang.Blocked as e:
+        print(f"[bunjang] 차단 감지, 이번 실행 중단: {e}")
+    except requests.RequestException as e:
+        print(f"[bunjang] 요청 실패: {e}")
+    finally:
+        state["bunjang_cursor"] = cursor
+    if baseline:
+        state["bunjang_baselined"] = True
+        print("[bunjang] 기준점 기록 완료 — 다음 실행부터 신규만 알림")
+    else:
+        print(f"[bunjang] 신규 알림 {found}건")
+
+
+def jumpoline_alert_text(row: dict, detail: dict) -> str:
+    e = notifier.esc
+    head = f"🏪 <b>[점포라인 · {e(row['category'] or '카페')}]</b> {e(row['region'])}"
+    if row.get("brand"):
+        head += f" · {e(row['brand'])}"
+    lines = [head, e(row["title"])]
+    if row.get("subtitle"):
+        lines.append(e(row["subtitle"][:70]))
+
+    facts = []
+    if row.get("premium_manwon") is not None:
+        facts.append(f"권리금 {daangn_realty.fmt_manwon_full(row['premium_manwon'])}")
+    if detail.get("interior_cost"):
+        facts.append(f"인테리어 {daangn_realty.fmt_manwon_full(detail['interior_cost'])}")
+    if row.get("floor"):
+        facts.append(row["floor"].strip())
+    if row.get("area"):
+        facts.append(row["area"].strip())
+    if facts:
+        lines.append(e(" · ".join(facts)))
+
+    econ = []
+    if row.get("profit"):
+        econ.append(f"월수익 {row['profit'].strip()}")
+    if row.get("payback"):
+        econ.append(f"권리회수 {row['payback'].strip()}")
+    if detail.get("startup_cost"):
+        econ.append(f"창업비용 {daangn_realty.fmt_manwon_full(detail['startup_cost'])}")
+    if econ:
+        lines.append(e(" · ".join(econ)))
+
+    if detail.get("address"):
+        lines.append(e(detail["address"]))
+    lines.append(row["url"])
+    return "\n".join(lines)
+
+
+def run_jumpoline(cfg: dict, state: dict, alerts: list, now: float) -> None:
+    """점포라인 서울 카페 양도 매물."""
+    j = cfg["jumpoline"]
+    if now - state["last_jumpoline"] < j["interval_min"] * 60:
+        return
+    try:
+        rows = jumpoline.list_seoul_cafes()
+    except jumpoline.Blocked as e:
+        print(f"[jumpoline] 차단/구조변경 감지: {e}")
+        return
+    except requests.RequestException as e:
+        print(f"[jumpoline] 요청 실패: {e}")
+        return
+    state["last_jumpoline"] = now
+
+    fresh = [r for r in rows if not is_seen(state, "jumpoline", r["id"])]
+    print(f"[jumpoline] 목록 {len(rows)}건 중 신규 {len(fresh)}건")
+
+    if not state["jumpoline_baselined"]:
+        for r in rows:
+            mark_seen(state, "jumpoline", r["id"])
+        state["jumpoline_baselined"] = True
+        print("[jumpoline] 기준점 기록 완료 — 다음 실행부터 신규만 알림")
+        return
+
+    cap = j["detail_cap_per_run"]
+    sent = 0
+    for row in fresh:
+        mark_seen(state, "jumpoline", row["id"])
+        if not row["region"].startswith("서울"):
+            continue
+        premium = row.get("premium_manwon")
+        if premium is not None and j.get("max_premium_manwon") and premium > j["max_premium_manwon"]:
+            continue
+        if j.get("keywords"):
+            text = f"{row['title']} {row['subtitle']} {row['brand']}"
+            if not any(kw in text for kw in j["keywords"]):
+                continue
+        detail = {}
+        if sent < cap:
+            detail = jumpoline.fetch_detail(row["raw_id"])
+            time.sleep(cfg["poll"]["jumpoline_delay_sec"])
+        add_alert(state, alerts, "jumpoline", jumpoline_alert_text(row, detail))
+        sent += 1
+    print(f"[jumpoline] 알림 {sent}건")
+
+
 def main() -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -302,6 +441,18 @@ def main() -> None:
         except Exception:
             traceback.print_exc()
             print("[buysell] 예기치 못한 오류 — 이번 실행의 중고거래 채널을 건너뜁니다.")
+    if cfg.get("bunjang", {}).get("enabled"):
+        try:
+            run_bunjang(cfg, state, alerts)
+        except Exception:
+            traceback.print_exc()
+            print("[bunjang] 예기치 못한 오류 — 이번 실행의 번개장터 채널을 건너뜁니다.")
+    if cfg.get("jumpoline", {}).get("enabled"):
+        try:
+            run_jumpoline(cfg, state, alerts, now)
+        except Exception:
+            traceback.print_exc()
+            print("[jumpoline] 예기치 못한 오류 — 이번 실행의 점포라인 채널을 건너뜁니다.")
 
     # 아침 요약: KST 기준 매일 digest_hour 이후 첫 실행에서 1회
     now_kst = datetime.now(KST)
