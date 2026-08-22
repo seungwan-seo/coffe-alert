@@ -110,6 +110,18 @@ def fetch_title(article_id) -> str | None:
         resp.close()
 
 
+def article_url(article_id, lat=None, lon=None) -> str:
+    """매물 URL. 좌표가 있으면 mv(지도 뷰포트) 파라미터를 붙여 지도가 해당 위치를 잡게 한다.
+    mv=남서위도,남서경도,북동위도,북동경도,줌 — 붙이지 않으면 지도가 엉뚱한 곳을 보여준다."""
+    url = f"{BASE}/articles/{article_id}"
+    try:
+        la, lo = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return url
+    dla, dlo = 0.0022, 0.0051   # 실제 웹 링크에서 관측한 뷰포트 크기 (줌 17 기준)
+    return f"{url}?mv={la - dla:.5f}%2C{lo - dlo:.5f}%2C{la + dla:.5f}%2C{lo + dlo:.5f}%2C17"
+
+
 def _parse_relay(html: str) -> dict:
     i = html.find("window.RELAY_STORE =")
     if i < 0:
@@ -142,9 +154,12 @@ def fetch_article(article_id) -> dict | None:
     if (art.get("images") or {}).get("__refs"):
         image = store[art["images"]["__refs"][0]].get("url")
 
+    coord = store[art["publicCoordinate"]["__ref"]] if art.get("publicCoordinate") else {}
+    lat, lon = coord.get("lat"), coord.get("lon")
+
     return {
         "id": str(art.get("originalId") or article_id),
-        "url": f"{BASE}/articles/{article_id}",
+        "url": article_url(article_id, lat, lon),
         "category": CATEGORY_KO.get(sales_type, sales_type),
         "trades": trades,
         "address": art.get("publicAddress") or art.get("address") or "",
@@ -157,6 +172,8 @@ def fetch_article(article_id) -> dict | None:
         "published_at": art.get("publishedAt", ""),
         "broker": biz,
         "image": image,
+        "lat": lat,
+        "lon": lon,
     }
 
 

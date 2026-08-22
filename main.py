@@ -13,6 +13,7 @@ import sys
 import time
 import traceback
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 import requests
 import yaml
@@ -57,6 +58,18 @@ def load_regions() -> list:
         return json.load(f)
 
 
+def kakao_map_link(address: str, lat=None, lon=None) -> str:
+    """카카오맵 링크. 당근 지도가 매물 위치를 콕 집어주지 않아서 보조로 넣는다.
+    좌표가 있으면 그 지점을 정확히 찍고(중개사 매물은 주소가 동 단위뿐인 경우가 많다),
+    없으면 주소 검색으로 넘긴다."""
+    try:
+        la, lo = float(lat), float(lon)
+    except (TypeError, ValueError):
+        return "https://map.kakao.com/?q=" + quote(address)
+    name = quote((address or "매물").split("(")[0].strip())
+    return f"https://map.kakao.com/link/map/{name},{la},{lo}"
+
+
 def realty_alert_text(listing: dict, rule: str) -> str:
     e = notifier.esc
     parts = [f"🏠 <b>[{e(listing['category'])} · {e(daangn_realty.fmt_trade(listing['trades']))}]</b> {e(listing['region'])}"]
@@ -75,6 +88,10 @@ def realty_alert_text(listing: dict, rule: str) -> str:
             pass
     extras.append("중개사" if listing.get("broker") else "직거래")
     parts.append(e(" · ".join(extras)))
+    address = listing.get("address") or ""
+    if address:
+        link = kakao_map_link(address, listing.get("lat"), listing.get("lon"))
+        parts.append(f'📍 {e(address)} · <a href="{link}">지도</a>')
     parts.append(f'{listing["url"]}')
     parts.append(f"<i>매칭: {e(rule)}</i>")
     return "\n".join(parts)
