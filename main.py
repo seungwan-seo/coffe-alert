@@ -78,9 +78,13 @@ def realty_alert_text(listing: dict, rule: str, cfg: dict = None) -> str:
     # 매매+월세 동시 등록 매물에서 preferred가 매매면 "매매 9억"으로 찍히기 때문.
     rent = matching.rented_trade(listing, allowed)
     shown = [rent] if rent else listing["trades"]
-    tag = matching.budget_tag(cfg, listing) if cfg else ""
+    tags = []
+    if cfg:
+        tags.append(matching.facility_tag(listing))   # 시설이 있는지가 STRATEGY상 1순위
+        tags.append(matching.budget_tag(cfg, listing))
     head = f"🏠 <b>[{e(listing['category'])} · {e(daangn_realty.fmt_trade(shown))}]</b> {e(listing['region'])}"
-    parts = [f"{tag} {head}" if tag else head]
+    prefix = " ".join(t for t in tags if t)
+    parts = [f"{prefix}\n{head}" if prefix else head]
     snippet = (listing["content"] or "").strip().replace("\n", " ")
     if len(snippet) > 90:
         snippet = snippet[:90] + "…"

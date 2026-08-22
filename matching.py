@@ -37,6 +37,38 @@ def deposit_manwon(listing: dict, allowed=None):
     return rented_trade(listing, allowed).get("deposit")
 
 
+# 시설 라벨 판정용 신호 (2026-08-23 실측, 알림 282건 기준)
+#  - 운영중 표현: 정밀도 79% / 재현율 69% — 가장 강한 단일 신호
+#  - 권리금>0     : 정밀도 59%  — 단독으로는 약함 (41%가 빈 상가)
+#  - 사진 개수    : 정밀도 29%  — 무의미해서 쓰지 않는다 (빈 상가도 사진을 많이 올림)
+RUNNING_RE = re.compile(
+    r"운영\s*중|운영해|운영하|운영했|영업\s*중|영업해|"
+    r"\d+\s*년\s*(?:째|간|동안|정도|넘게)|매출|단골|폐업"
+)
+HANDOVER_RE = re.compile(
+    r"양도|인수|넘기|넘겨|넘김|시설\s*완비|시설완비|인테리어\s*그대로|그대로\s*사용|"
+    r"집기\s*포함|풀\s*옵션|바로\s*영업|즉시\s*영업|기물"
+)
+NO_PREMIUM_RE = re.compile(r"무권리|권리금\s*없|권리\s*없")
+
+
+def facility_tag(listing: dict) -> str:
+    """시설이 갖춰져 있는지 표시만 한다 (거르지 않음).
+    STRATEGY 전제가 '빈 상가가 아니라 기존 카페 인수'라 이 구분이 핵심이다."""
+    body = listing.get("content") or ""
+    premium = listing.get("premium_money") or 0
+    running = bool(RUNNING_RE.search(body))
+    handover = bool(HANDOVER_RE.search(body))
+
+    if running or (premium > 100 and handover):
+        return "🏗 시설완비"
+    if premium > 0 or handover:
+        return "🔧 일부시설"
+    if NO_PREMIUM_RE.search(body):
+        return "🚧 빈상가"
+    return "🚧 빈상가"
+
+
 def budget_tag(cfg: dict, listing: dict) -> str:
     """예산 라벨. 거르지 않고 표시만 한다."""
     b = (cfg.get("realty") or {}).get("budget") or {}
