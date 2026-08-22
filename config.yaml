@@ -7,6 +7,9 @@ realty:
   # 주소가 이 문자열로 시작하면 통과 (예: "서울특별시", "경기도 성남시")
   regions:
     - "서울특별시"
+  # 거래 유형: MONTH(월세) BORROW(전세) BUY(매매) SHORT(단기)
+  # 세를 얻는 게 목적이므로 매매는 제외. 비우면 전체 허용.
+  trade_types: ["MONTH", "BORROW", "SHORT"]
   # 빠른 감지 레인이 폴링할 카테고리 페이지 (서울 25개 구 × 카테고리 수만큼 요청)
   fast_categories: ["상가"]
   # 규칙 중 하나라도 맞으면 알림. categories가 빈 리스트면 매물 종류 무관.

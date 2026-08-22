@@ -34,6 +34,14 @@ def match_realty(cfg: dict, listing: dict):
     if r["regions"] and not any(address.startswith(reg) for reg in r["regions"]):
         return None
 
+    # 거래 유형 필터 — 세를 얻는 게 목적이라 매매(BUY)는 제외한다
+    allowed = r.get("trade_types")
+    if allowed:
+        trades = listing.get("trades") or []
+        kinds = {t.get("type") for t in trades}
+        if kinds and not (kinds & set(allowed)):
+            return None
+
     # 구 페이지 큐레이션이 바뀌며 한참 전 매물이 갑자기 노출될 수 있다 — 오래된 건 조용히 넘어감
     freshness_days = r.get("freshness_days") or 0
     published = listing.get("published_at") or ""
