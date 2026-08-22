@@ -70,15 +70,29 @@ def kakao_map_link(address: str, lat=None, lon=None) -> str:
     return f"https://map.kakao.com/link/map/{name},{la},{lo}"
 
 
-def realty_alert_text(listing: dict, rule: str) -> str:
+def realty_alert_text(listing: dict, rule: str, cfg: dict = None) -> str:
     e = notifier.esc
-    parts = [f"🏠 <b>[{e(listing['category'])} · {e(daangn_realty.fmt_trade(listing['trades']))}]</b> {e(listing['region'])}"]
+    cfg = cfg or {}
+    allowed = (cfg.get("realty") or {}).get("trade_types")
+    # 헤더 금액은 preferred가 아니라 '임대 거래'를 쓴다 —
+    # 매매+월세 동시 등록 매물에서 preferred가 매매면 "매매 9억"으로 찍히기 때문.
+    rent = matching.rented_trade(listing, allowed)
+    shown = [rent] if rent else listing["trades"]
+    tag = matching.budget_tag(cfg, listing) if cfg else ""
+    head = f"🏠 <b>[{e(listing['category'])} · {e(daangn_realty.fmt_trade(shown))}]</b> {e(listing['region'])}"
+    parts = [f"{tag} {head}" if tag else head]
     snippet = (listing["content"] or "").strip().replace("\n", " ")
     if len(snippet) > 90:
         snippet = snippet[:90] + "…"
     if snippet:
         parts.append(e(snippet))
     extras = []
+    if listing.get("floor"):
+        try:
+            fl = int(float(listing["floor"]))
+            extras.append(f"지하{abs(fl)}층" if fl < 0 else ("반지하" if fl == 0 else f"{fl}층"))
+        except (TypeError, ValueError):
+            pass
     if listing.get("premium_money"):
         extras.append(f"권리금 {daangn_realty.fmt_manwon_full(listing['premium_money'])}")
     if listing.get("area_m2"):
@@ -119,7 +133,7 @@ def run_realty(cfg: dict, state: dict, alerts: list, now: float) -> None:
             return
         rule = matching.match_realty(cfg, listing)
         if rule:
-            add_alert(state, alerts, "realty", realty_alert_text(listing, rule),
+            add_alert(state, alerts, "realty", realty_alert_text(listing, rule, cfg),
                       photo=listing.get("image") if poll.get("photos", True) else None)
             # 가격 인하 추적 대상으로 등록
             state["realty_watch"][listing["id"]] = {

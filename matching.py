@@ -13,6 +13,44 @@ POSITIVE_RE = re.compile(r"추천|가능|자리|창업|운영|양도|영업|인�
 CLAUSE_SPLIT_RE = re.compile(r"[\n.!?;]+")
 
 
+def rented_trade(listing: dict, allowed=None) -> dict:
+    """금액 판단에 쓸 임대 거래를 고른다.
+    preferred를 쓰면 안 된다 — 매매+월세 동시 등록 매물에서 preferred가 매매일 수 있어
+    월세 검사를 통째로 건너뛴다."""
+    trades = listing.get("trades") or []
+    kinds = set(allowed or ["MONTH"])
+    return next((t for t in trades if t.get("type") in kinds), {})
+
+
+def rent_manwon(listing: dict, allowed=None):
+    """임대 거래의 월세(만원). 없으면 None."""
+    return rented_trade(listing, allowed).get("monthlyPay")
+
+
+def deposit_manwon(listing: dict, allowed=None):
+    return rented_trade(listing, allowed).get("deposit")
+
+
+def budget_tag(cfg: dict, listing: dict) -> str:
+    """예산 라벨. 거르지 않고 표시만 한다."""
+    b = (cfg.get("realty") or {}).get("budget") or {}
+    if not b:
+        return ""
+    allowed = (cfg.get("realty") or {}).get("trade_types")
+    monthly = rent_manwon(listing, allowed)
+    if monthly is None:
+        return "⚪ 금액미상"
+    deposit = deposit_manwon(listing, allowed) or 0
+    premium = listing.get("premium_money") or 0
+    if (monthly <= b.get("starter_monthly", 60)
+            and deposit <= b.get("starter_deposit", 1000)
+            and premium <= b.get("starter_premium", 300)):
+        return "💚 소액창업"
+    if monthly <= b.get("review_monthly", 120):
+        return "🟡 검토"
+    return "🔴 예산초과"
+
+
 def _keyword_hit(text: str, keywords: list, excludes: list) -> bool:
     for phrase in excludes:
         text = text.replace(phrase, "")
@@ -41,6 +79,12 @@ def match_realty(cfg: dict, listing: dict):
         kinds = {t.get("type") for t in trades}
         if kinds and not (kinds & set(allowed)):
             return None
+
+    # 월세 상한 — 하루 50잔(월 공헌이익 195만원)으로도 계산이 안 서는 구간은 버린다
+    cap = r.get("max_monthly_manwon") or 0
+    monthly = rent_manwon(listing, allowed)
+    if cap and monthly is not None and monthly > cap:
+        return None
 
     # 구 페이지 큐레이션이 바뀌며 한참 전 매물이 갑자기 노출될 수 있다 — 오래된 건 조용히 넘어감
     freshness_days = r.get("freshness_days") or 0

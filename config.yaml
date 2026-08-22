@@ -10,6 +10,17 @@ realty:
   # 거래 유형: MONTH(월세) BORROW(전세) BUY(매매) SHORT(단기)
   # 월세만 본다. 매매·전세는 목적에 안 맞고, 단기는 카페 창업에 부적합. 비우면 전체 허용.
   trade_types: ["MONTH"]
+
+  # 예산 라벨 — 거르지 않고 알림 앞에 표시만 한다 (STRATEGY §12: 월세 싼 게 목표가 아님).
+  # 단위: 만원. 세 조건을 모두 만족하면 소액창업, 월세가 review 이하면 검토, 그 외 예산초과.
+  budget:
+    starter_monthly: 60      # 💚 소액창업 — STRATEGY §7 "매우 좋음~좋음" 구간
+    starter_deposit: 1000
+    starter_premium: 300     # STRATEGY §11 권리금 0~300
+    review_monthly: 120      # 🟡 검토 — §7 "100만원 이상 신중"에 여유
+  # 이 월세를 넘으면 알림하지 않는다. 하루 50잔(월 공헌이익 195만원)으로도
+  # 계산이 성립하지 않는 구간이라 검토 가치가 없다. 0이면 상한 없음.
+  max_monthly_manwon: 300
   # 빠른 감지 레인이 폴링할 카테고리 페이지 (서울 25개 구 × 카테고리 수만큼 요청)
   fast_categories: ["상가"]
   # 규칙 중 하나라도 맞으면 알림. categories가 빈 리스트면 매물 종류 무관.
@@ -58,6 +69,14 @@ buysell:
       aliases: ["커피머신", "커피 머신", "에스프레소머신"]
     - keyword: "키오스크"
       min_price: 300000
+    # 폐업하며 집기를 통째로 넘기는 건 — 무료나눔보다 실속 있다.
+    # (2026-08 실측: 카페용 집기 나눔은 사실상 0건, 나눔은 전부 가정용 가구였다)
+    - keyword: "카페 폐업"
+      min_price: 0
+      aliases: ["카페폐업", "커피숍 폐업", "카페 정리", "카페 집기"]
+    - keyword: "폐업 일괄"
+      min_price: 0
+      aliases: ["폐업일괄", "집기 일괄", "집기일괄", "폐업 정리"]
 
 # 번개장터 중고 장비 (공개 JSON API, 최신순)
 bunjang:
@@ -77,6 +96,9 @@ bunjang:
       aliases: ["무인 카페"]
     - keyword: "키오스크"
       min_price: 300000
+    - keyword: "카페 폐업"
+      min_price: 0
+      aliases: ["카페폐업", "커피숍 폐업", "카페 정리", "카페 집기"]
 
 # 점포라인 서울 카페 양도 매물 (m.jumpoline.com, 최신 100건 고정)
 jumpoline:
