@@ -12,6 +12,12 @@ NEGATION_WINDOW = 12
 POSITIVE_RE = re.compile(r"추천|가능|자리|창업|운영|양도|영업|인수|매출")
 CLAUSE_SPLIT_RE = re.compile(r"[\n.!?;]+")
 
+# "추천업종 : 판매점, 사무실, 공방, 무인카페, 의류샵 등" 처럼 중개사가 나열한
+# 업종 목록에 키워드가 끼어 있는 경우. 빈 상가 광고의 상투 문구라 매물 성격과 무관하다.
+# 2026-08-23 실측: 알림 242건 중 38건(16%)이 이 패턴 하나 때문에 걸렸다.
+RECOMMEND_RE = re.compile(r"추천\s*업종|업종\s*추천|가능\s*업종|권장\s*업종|업종\s*안내|다용도")
+RECOMMEND_LOOKBACK = 60
+
 
 def rented_trade(listing: dict, allowed=None) -> dict:
     """금액 판단에 쓸 임대 거래를 고른다.
@@ -57,10 +63,14 @@ def _keyword_hit(text: str, keywords: list, excludes: list) -> bool:
     for clause in CLAUSE_SPLIT_RE.split(text):
         for kw in keywords:
             for m in re.finditer(re.escape(kw), clause):
+                # 업종 추천 목록 안의 등장은 무시 (빈 상가 광고 상투구)
+                back = clause[max(0, m.start() - RECOMMEND_LOOKBACK):m.start()]
+                if RECOMMEND_RE.search(back):
+                    continue
                 window = clause[m.end():m.end() + NEGATION_WINDOW]
                 neg = NEGATION_RE.search(window)
                 if not neg or POSITIVE_RE.search(window[:neg.start()]):
-                    return True   # 부정 문맥이 아닌 등장이 하나라도 있으면 매칭
+                    return True   # 부정 문맥도 추천목록도 아닌 등장이 하나라도 있으면 매칭
     return False
 
 
