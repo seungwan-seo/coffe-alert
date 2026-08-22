@@ -33,6 +33,10 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      # 매물 URL 파라미터 회귀 테스트 (지도 필터가 빠지면 여기서 잡힌다)
+      - name: Test URL params
+        run: python test_url_params.py
+
       - name: Run crawler
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
