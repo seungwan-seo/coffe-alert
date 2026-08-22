@@ -79,9 +79,13 @@ def realty_alert_text(listing: dict, rule: str, cfg: dict = None) -> str:
     rent = matching.rented_trade(listing, allowed)
     shown = [rent] if rent else listing["trades"]
     tags = []
+    hospital, dist = matching.nearest_hospital(listing)
     if cfg:
         tags.append(matching.facility_tag(listing))   # 시설이 있는지가 STRATEGY상 1순위
         tags.append(matching.budget_tag(cfg, listing))
+        radius = (cfg.get("realty") or {}).get("hospital_radius_m", 600)
+        if dist is not None and dist <= radius:
+            tags.append("🏥 병원세권")
     head = f"🏠 <b>[{e(listing['category'])} · {e(daangn_realty.fmt_trade(shown))}]</b> {e(listing['region'])}"
     prefix = " ".join(t for t in tags if t)
     parts = [f"{prefix}\n{head}" if prefix else head]
@@ -106,6 +110,8 @@ def realty_alert_text(listing: dict, rule: str, cfg: dict = None) -> str:
             pass
     extras.append("중개사" if listing.get("broker") else "직거래")
     parts.append(e(" · ".join(extras)))
+    if hospital and dist is not None and dist <= 1500:
+        parts.append(e(f"🏥 {hospital['name']} {dist:,}m"))
     address = listing.get("address") or ""
     if address:
         link = kakao_map_link(address, listing.get("lat"), listing.get("lon"))

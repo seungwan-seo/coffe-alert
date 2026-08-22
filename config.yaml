@@ -18,6 +18,9 @@ realty:
     starter_deposit: 1000
     starter_premium: 300     # STRATEGY §11 권리금 0~300
     review_monthly: 120      # 🟡 검토 — §7 "100만원 이상 신중"에 여유
+  # 이 거리(m) 안에 대형병원이 있으면 🏥 병원세권 라벨. 목록은 hospitals.json.
+  hospital_radius_m: 600
+
   # 이 월세를 넘으면 알림하지 않는다. 하루 50잔(월 공헌이익 195만원)으로도
   # 계산이 성립하지 않는 구간이라 검토 가치가 없다. 0이면 상한 없음.
   max_monthly_manwon: 300

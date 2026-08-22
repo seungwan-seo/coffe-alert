@@ -1,6 +1,41 @@
 """설정 기반 필터링 로직."""
+import json
+import math
+import os
 import re
 from datetime import datetime, timedelta, timezone
+
+# 서울 대형병원 좌표 (OpenStreetMap Overpass에서 수집, 2026-08-23).
+# STRATEGY §6의 '반복수요' 배후시설 중 병원은 24시간 유동이 있어 무인카페와 궁합이 좋다.
+_HOSPITAL_PATH = os.path.join(os.path.dirname(__file__), "hospitals.json")
+try:
+    with open(_HOSPITAL_PATH, encoding="utf-8") as _f:
+        HOSPITALS = json.load(_f)
+except (OSError, ValueError):
+    HOSPITALS = []
+
+
+def _meters(lat1, lon1, lat2, lon2) -> float:
+    """두 좌표 사이 거리(m). 서울 규모에서는 평면 근사로 충분하다."""
+    dlat = (lat2 - lat1) * 111_320
+    dlon = (lon2 - lon1) * 111_320 * math.cos(math.radians((lat1 + lat2) / 2))
+    return math.hypot(dlat, dlon)
+
+
+def nearest_hospital(listing: dict):
+    """가장 가까운 대형병원과 거리(m). 좌표가 없으면 (None, None)."""
+    try:
+        la, lo = float(listing.get("lat")), float(listing.get("lon"))
+    except (TypeError, ValueError):
+        return None, None
+    best = min(
+        (( _meters(la, lo, h["lat"], h["lon"]), h) for h in HOSPITALS),
+        default=(None, None),
+        key=lambda x: x[0],
+    )
+    if best[0] is None:
+        return None, None
+    return best[1], round(best[0])
 
 # "음식점,카페,플라워샵은 안됩니다" / "카페 업종은 불가" 처럼 업종을 금지하는 문구를 걸러내기 위한 것.
 # 키워드 바로 뒤(같은 절, 10자 이내)에 부정 표현이 오면 그 등장은 매칭으로 치지 않는다.
