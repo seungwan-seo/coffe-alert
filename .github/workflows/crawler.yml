@@ -37,6 +37,10 @@ jobs:
       - name: Test URL params
         run: python test_url_params.py
 
+      # 양도 매물 판정·우선순위 회귀 테스트 (오탐 업종이 다시 섞이면 여기서 잡힌다)
+      - name: Test handover priority
+        run: python test_handover.py
+
       - name: Run crawler
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}

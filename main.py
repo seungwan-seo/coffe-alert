@@ -31,10 +31,25 @@ HERE = os.path.dirname(__file__)
 KST = timezone(timedelta(hours=9))
 
 
-def add_alert(state: dict, alerts: list, channel: str, text: str, photo=None) -> None:
-    alerts.append({"text": text, "photo": photo})
+def add_alert(state: dict, alerts: list, channel: str, text: str, photo=None, priority: int = 0) -> None:
+    """priority: 0 = 일반, 1 = 🔥 카페 양도, 2 = 🔥 무인카페 양도.
+    높은 것부터 보내고, 일반 알림은 설정에 따라 무음으로 보낸다."""
+    alerts.append({"text": text, "photo": photo, "priority": priority})
     stats = state.setdefault("stats", {})
     stats[channel] = stats.get(channel, 0) + 1
+    if priority:
+        stats["handover"] = stats.get("handover", 0) + 1
+
+
+def record_handover(state: dict, label: str, url: str, priority: int) -> None:
+    """아침 브리핑에 링크로 싣기 위해 양도 매물을 남긴다 (놓치면 안 되는 1순위라 따로 모은다)."""
+    log = state.setdefault("handover_log", [])
+    log.append({"label": label[:60], "url": url, "priority": priority})
+    del log[:-30]
+
+
+def alert_priority(alert) -> int:
+    return alert.get("priority", 0) if isinstance(alert, dict) else 0
 
 
 def record_drop(state: dict, label: str, before: str, after: str, url: str) -> None:
@@ -80,6 +95,7 @@ def realty_alert_text(listing: dict, rule: str, cfg: dict = None) -> str:
     shown = [rent] if rent else listing["trades"]
     tags = []
     hospital, dist = matching.nearest_hospital(listing)
+    priority, handover_label = matching.handover_grade(listing)
     if cfg:
         tags.append(matching.facility_tag(listing))   # 시설이 있는지가 STRATEGY상 1순위
         tags.append(matching.budget_tag(cfg, listing))
@@ -88,6 +104,9 @@ def realty_alert_text(listing: dict, rule: str, cfg: dict = None) -> str:
             tags.append("🏥 병원세권")
     head = f"🏠 <b>[{e(listing['category'])} · {e(daangn_realty.fmt_trade(shown))}]</b> {e(listing['region'])}"
     prefix = " ".join(t for t in tags if t)
+    if handover_label:
+        # 양도 매물은 첫 줄을 굵게 — 1순위라 스크롤하다 멈추게 만든다
+        prefix = f"<b>{handover_label}</b>" + (f" · {prefix}" if prefix else "")
     parts = [f"{prefix}\n{head}" if prefix else head]
     snippet = (listing["content"] or "").strip().replace("\n", " ")
     if len(snippet) > 90:
@@ -121,13 +140,28 @@ def realty_alert_text(listing: dict, rule: str, cfg: dict = None) -> str:
     return "\n".join(parts)
 
 
-def buysell_alert_text(item: dict, keyword: str, source: str = "당근") -> str:
+HANDOVER_LABELS = {1: "🔥 카페 양도", 2: "🔥 무인카페 양도"}
+
+
+def handover_priority(search_cfg: dict, item: dict) -> int:
+    """중고거래/번개 검색어에 handover: true가 붙어 있으면 양도 글로 본다.
+    글에 '무인'이 있으면 우리 업종 그대로(2), 아니면 카페 시설 인수(1)."""
+    if not search_cfg.get("handover"):
+        return 0
+    text = f"{item.get('title') or ''} {item.get('content') or ''}"
+    return 2 if "무인" in text else 1
+
+
+def buysell_alert_text(item: dict, keyword: str, source: str = "당근", priority: int = 0) -> str:
     e = notifier.esc
-    return "\n".join([
+    lines = [
         f"🛠 <b>[{e(source)} · {e(keyword)}]</b> {e(item['title'])}",
         f"{e(daangn_buysell.fmt_price(item['price']))} · {e(item['region'] or '지역미상')}",
         item["url"],
-    ])
+    ]
+    if priority:
+        lines.insert(0, f"<b>{HANDOVER_LABELS[priority]}</b>")
+    return "\n".join(lines)
 
 
 def run_realty(cfg: dict, state: dict, alerts: list, now: float) -> None:
@@ -143,8 +177,14 @@ def run_realty(cfg: dict, state: dict, alerts: list, now: float) -> None:
             return
         rule = matching.match_realty(cfg, listing)
         if rule:
+            priority, label = matching.handover_grade(listing)
             add_alert(state, alerts, "realty", realty_alert_text(listing, rule, cfg),
-                      photo=listing.get("image") if poll.get("photos", True) else None)
+                      photo=listing.get("image") if poll.get("photos", True) else None,
+                      priority=priority)
+            if priority:
+                rent = daangn_realty.fmt_trade([matching.rented_trade(listing, r.get("trade_types"))]
+                                               if matching.rented_trade(listing, r.get("trade_types")) else listing["trades"])
+                record_handover(state, f"{label} · {listing['region']} · {rent}", listing["url"], priority)
             # 가격 인하 추적 대상으로 등록
             state["realty_watch"][listing["id"]] = {
                 "trade": daangn_realty.trade_snapshot(listing["trades"]),
@@ -304,8 +344,13 @@ def run_buysell(cfg: dict, state: dict, alerts: list, regions: list) -> None:
                 verdict = matching.match_buysell(search_cfg, item, cfg["buysell"]["freshness_days"])
                 if verdict == "match":
                     mark_seen(state, "buysell", item["id"])
-                    add_alert(state, alerts, "buysell", buysell_alert_text(item, search_cfg["keyword"]),
-                              photo=item.get("thumbnail") if poll.get("photos", True) else None)
+                    priority = handover_priority(search_cfg, item)
+                    add_alert(state, alerts, "buysell",
+                              buysell_alert_text(item, search_cfg["keyword"], priority=priority),
+                              photo=item.get("thumbnail") if poll.get("photos", True) else None,
+                              priority=priority)
+                    if priority:
+                        record_handover(state, f"🛠 {item['title']}", item["url"], priority)
                     state["buysell_watch"][str(item["id"])] = {
                         "price": item.get("price"), "ts": time.time(),
                         "url": item["url"], "title": item["title"][:60],
@@ -357,9 +402,13 @@ def run_bunjang(cfg: dict, state: dict, alerts: list) -> None:
                 verdict = matching.match_buysell(search_cfg, item, b["freshness_days"])
                 if verdict == "match":
                     mark_seen(state, "bunjang", item["id"])
+                    priority = handover_priority(search_cfg, item)
                     add_alert(state, alerts, "buysell",
-                              buysell_alert_text(item, search_cfg["keyword"], source="번개"),
-                              photo=item.get("thumbnail") if cfg["poll"].get("photos", True) else None)
+                              buysell_alert_text(item, search_cfg["keyword"], source="번개", priority=priority),
+                              photo=item.get("thumbnail") if cfg["poll"].get("photos", True) else None,
+                              priority=priority)
+                    if priority:
+                        record_handover(state, f"🛠 [번개] {item['title']}", item["url"], priority)
                     found += 1
                 elif verdict == "perm":
                     mark_seen(state, "bunjang", item["id"])
@@ -376,12 +425,14 @@ def run_bunjang(cfg: dict, state: dict, alerts: list) -> None:
         print(f"[bunjang] 신규 알림 {found}건")
 
 
-def jumpoline_alert_text(row: dict, detail: dict) -> str:
+def jumpoline_alert_text(row: dict, detail: dict, priority: int = 0) -> str:
     e = notifier.esc
     head = f"🏪 <b>[점포라인 · {e(row['category'] or '카페')}]</b> {e(row['region'])}"
     if row.get("brand"):
         head += f" · {e(row['brand'])}"
     lines = [head, e(row["title"])]
+    if priority:
+        lines.insert(0, f"<b>{HANDOVER_LABELS[priority]}</b>")
     if row.get("subtitle"):
         lines.append(e(row["subtitle"][:70]))
 
@@ -455,7 +506,12 @@ def run_jumpoline(cfg: dict, state: dict, alerts: list, now: float) -> None:
         if sent < cap:
             detail = jumpoline.fetch_detail(row["raw_id"])
             time.sleep(cfg["poll"]["jumpoline_delay_sec"])
-        add_alert(state, alerts, "jumpoline", jumpoline_alert_text(row, detail))
+        # 점포라인은 전부 양도 매물 — 무인이면 2, 아니면 설정값(기본 1)
+        text = f"{row['title']} {row.get('subtitle') or ''} {row.get('brand') or ''}"
+        priority = 2 if "무인" in text else int(j.get("priority", 1))
+        add_alert(state, alerts, "jumpoline", jumpoline_alert_text(row, detail, priority), priority=priority)
+        if priority:
+            record_handover(state, f"🏪 {row['region']} · {row['title']}", row["url"], priority)
         sent += 1
     print(f"[jumpoline] 알림 {sent}건")
 
@@ -515,9 +571,18 @@ def main() -> None:
         s = state.get("stats", {})
         lines = [
             f"🌅 <b>아침 브리핑</b> ({today})",
-            f"지난 요약 이후 알림: 🏠 매물 {s.get('realty', 0)}건 · 🏪 점포라인 {s.get('jumpoline', 0)}건 "
-            f"· 🛠 장비 {s.get('buysell', 0)}건 · 💰 가격 인하 {s.get('drop', 0)}건",
+            f"지난 요약 이후 알림: 🔥 양도 {s.get('handover', 0)}건 · 🏠 매물 {s.get('realty', 0)}건 "
+            f"· 🏪 점포라인 {s.get('jumpoline', 0)}건 · 🛠 장비 {s.get('buysell', 0)}건 · 💰 가격 인하 {s.get('drop', 0)}건",
         ]
+        # 양도 매물은 1순위라 놓치지 않게 링크로 다시 모아 준다 (무인 → 카페 순)
+        handovers = sorted(state.get("handover_log", []), key=lambda h: -h.get("priority", 0))
+        if handovers:
+            lines.append("")
+            lines.append("🔥 <b>양도 매물 다시 보기</b>")
+            for h in handovers[:10]:
+                lines.append(f'· <a href="{h["url"]}">{notifier.esc(h["label"])}</a>')
+            if len(handovers) > 10:
+                lines.append(f"…그 외 {len(handovers) - 10}건")
         drops = state.get("drop_log", [])
         if drops:
             lines.append("")
@@ -537,15 +602,22 @@ def main() -> None:
         command_replies.append("\n".join(lines))
         state["stats"] = {}
         state["drop_log"] = []
+        state["handover_log"] = []
         state["last_digest_day"] = today
 
     cap = cfg["poll"]["max_alerts_per_run"]
+    # 🔥 양도 매물이 맨 앞. 상한에 걸려 이월되는 건 항상 일반 알림이다.
+    # (sort는 안정 정렬이라 같은 우선순위끼리는 채널 처리 순서를 유지한다)
+    alerts.sort(key=alert_priority, reverse=True)
     to_send = alerts[:cap]
     overflow = alerts[cap:]   # 상한 초과분은 버리지 않고 outbox로 넘겨 다음 실행에서 이어 보냄
     if overflow:
         to_send.append(f"…그 외 {len(overflow)}건은 다음 실행에서 이어서 보냅니다")
-    # 명령 응답/브리핑은 상한과 무관하게 먼저, 그다음 지난 실행에서 못 보낸 알림(outbox) 재시도
-    queue = command_replies + state.get("outbox", [])[:cap] + to_send
+    # 명령 응답/브리핑은 상한과 무관하게 먼저, 그다음 지난 실행에서 못 보낸 알림(outbox) 재시도.
+    # outbox도 양도 먼저 — 전송 실패로 밀린 양도 매물이 일반 알림 뒤에 서지 않게.
+    outbox = sorted(state.get("outbox", []), key=alert_priority, reverse=True)
+    queue = command_replies + outbox[:cap] + to_send
+    silent_others = bool((cfg.get("priority") or {}).get("silent_others", False))
     failed = []
     if not args.dry_run and notifier.dry_run() and queue:
         print(f"[알림] 텔레그램 토큰 미설정 — {len(queue)}건을 아웃박스에 보관합니다 (토큰 연결 후 첫 실행에서 전송)")
@@ -558,12 +630,15 @@ def main() -> None:
             failed.append(alert)   # 토큰 미설정 — 유실 방지를 위해 보관
             continue
         try:
-            notifier.send_alert(alert)
+            # 일반 알림은 무음(폰이 안 울림), 양도·브리핑·가격인하 등은 소리 나게
+            silent = silent_others and isinstance(alert, dict) and alert_priority(alert) == 0 \
+                and not alert.get("text", "").startswith("💰")
+            notifier.send_alert(alert, silent=silent)
         except Exception as e:
             print(f"[전송 실패, 다음 실행에 재시도] {e}")
             failed.append(alert)
     # 재시도 대상: 이번에 전송 실패한 것 + 상한 초과분 + 이번에 순번이 안 온 기존 outbox
-    state["outbox"] = (failed + overflow + state.get("outbox", [])[cap:])[:100]
+    state["outbox"] = sorted(failed + overflow + outbox[cap:], key=alert_priority, reverse=True)[:100]
 
     save_state(state, cfg["poll"]["state_max_age_days"])
     mode = "dry-run" if args.dry_run or notifier.dry_run() else "live"

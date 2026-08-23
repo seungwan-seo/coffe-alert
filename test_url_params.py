@@ -6,6 +6,8 @@
 실행: python test_url_params.py   (네트워크 불필요)
 """
 import sys
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 from urllib.parse import parse_qs, unquote, urlparse
 
 from daangn_realty import article_url

@@ -49,8 +49,10 @@ def _request(method: str, payload: dict) -> None:
     resp.raise_for_status()
 
 
-def _post(chat_id: str, text: str) -> None:
+def _post(chat_id: str, text: str, silent: bool = False) -> None:
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+    if silent:
+        payload["disable_notification"] = True   # 알림음 없이 도착 (양도 매물만 울리게 하려고)
     # 링크가 여러 개인 메시지(브리핑 등)는 미리보기를 끈다 — 안 그러면 첫 링크 카드가 크게 붙는다
     if text.count("http") > 1:
         payload["link_preview_options"] = {"is_disabled": True}
@@ -68,13 +70,16 @@ def send(text: str) -> None:
         time.sleep(1.1)  # 같은 채팅으로 초당 1건 제한 준수
 
 
-def _post_photo(chat_id: str, photo: str, caption: str) -> None:
-    _request("sendPhoto", {"chat_id": chat_id, "photo": photo, "caption": caption[:1024], "parse_mode": "HTML"})
+def _post_photo(chat_id: str, photo: str, caption: str, silent: bool = False) -> None:
+    payload = {"chat_id": chat_id, "photo": photo, "caption": caption[:1024], "parse_mode": "HTML"}
+    if silent:
+        payload["disable_notification"] = True
+    _request("sendPhoto", payload)
 
 
-def send_alert(alert) -> None:
+def send_alert(alert, silent: bool = False) -> None:
     """알림 1건 전송. alert는 문자열(텍스트만) 또는 {"text": ..., "photo": url|None}.
-    사진 전송이 실패하면 텍스트로 폴백한다."""
+    사진 전송이 실패하면 텍스트로 폴백한다. silent면 수신자 폰이 울리지 않는다."""
     if isinstance(alert, str):
         send(alert)
         return
@@ -86,13 +91,13 @@ def send_alert(alert) -> None:
     for chat_id in CHAT_IDS:
         if photo:
             try:
-                _post_photo(chat_id, photo, text)
+                _post_photo(chat_id, photo, text, silent)
             except requests.HTTPError as e:
                 status = e.response.status_code if e.response is not None else 0
                 if 400 <= status < 500 and status != 429:
-                    _post(chat_id, text)   # 사진 URL 거부 등 결정적 실패만 텍스트 폴백
+                    _post(chat_id, text, silent)   # 사진 URL 거부 등 결정적 실패만 텍스트 폴백
                 else:
-                    raise                  # 일시적 오류는 outbox 재시도로 (사진 유지)
+                    raise                          # 일시적 오류는 outbox 재시도로 (사진 유지)
         else:
-            _post(chat_id, text)
+            _post(chat_id, text, silent)
         time.sleep(1.1)
