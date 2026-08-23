@@ -41,6 +41,10 @@ jobs:
       - name: Test handover priority
         run: python test_handover.py
 
+      # 입지 라벨 회귀 테스트 (학교·동 임대료·역 데이터와 점-폴리곤)
+      - name: Test location labels
+        run: python test_location.py
+
       - name: Run crawler
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}

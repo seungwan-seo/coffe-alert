@@ -5,14 +5,27 @@ import os
 import re
 from datetime import datetime, timedelta, timezone
 
-# 서울 대형병원 좌표 (OpenStreetMap Overpass에서 수집, 2026-08-23).
-# STRATEGY §6의 '반복수요' 배후시설 중 병원은 24시간 유동이 있어 무인카페와 궁합이 좋다.
-_HOSPITAL_PATH = os.path.join(os.path.dirname(__file__), "hospitals.json")
-try:
-    with open(_HOSPITAL_PATH, encoding="utf-8") as _f:
-        HOSPITALS = json.load(_f)
-except (OSError, ValueError):
-    HOSPITALS = []
+# ── 입지 데이터 (2026-08-24 서울 무인카페 2019~22 개업 487건 장기생존/조기폐업 분석 기반) ──
+# 갈린 변수: ① 초중고 450m 안에 없으면 3년 생존 44% vs 72% (가장 단단함, 임대료·구·코호트 통제해도 유지)
+#           ② 행정동 1층 평당 환산임대료 상위 1/3(≥15.6만)이면 52% vs 76%
+#           ③ 비싼 동 + 역 364m 안 = 37% (역세권은 비싼 동에서만 나쁘다; 싼 동에선 80 vs 80)
+# 안 갈린 변수: 무인카페 이웃 수, 동 인구, 층, 아파트 단지 상가, 저가 프랜차이즈, 대학, **대형병원**
+# → 🏥 병원세권 라벨은 근거가 없어 제거했다(병원 600m 내 58%, 오히려 낮은 쪽).
+_HERE = os.path.dirname(__file__)
+
+
+def _load_json(name, default):
+    try:
+        with open(os.path.join(_HERE, name), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+SCHOOLS = _load_json("schools.json", [])          # 초중고 2,131곳 (OSM, 서울)
+SUBWAY = _load_json("subway.json", [])            # 지하철역 369곳 (서울시 역사마스터, 역명 기준 중복 제거)
+DONG_RENT = _load_json("dong_rent.json", {})      # 행정동코드(8자리) → {name, gu, rent(원/3.3㎡/월, 1층 환산), q}
+DONG_BOUNDARY = _load_json("dong_boundary.json", [])   # 행정동 외곽 링 (점-폴리곤용)
 
 
 def _meters(lat1, lon1, lat2, lon2) -> float:
@@ -22,20 +35,98 @@ def _meters(lat1, lon1, lat2, lon2) -> float:
     return math.hypot(dlat, dlon)
 
 
-def nearest_hospital(listing: dict):
-    """가장 가까운 대형병원과 거리(m). 좌표가 없으면 (None, None)."""
+def _coords(listing: dict):
     try:
-        la, lo = float(listing.get("lat")), float(listing.get("lon"))
+        return float(listing.get("lat")), float(listing.get("lon"))
     except (TypeError, ValueError):
+        return None
+
+
+def _nearest(listing: dict, points: list):
+    """(가장 가까운 점, 거리 m). 좌표가 없으면 (None, None)."""
+    c = _coords(listing)
+    if not c or not points:
         return None, None
-    best = min(
-        (( _meters(la, lo, h["lat"], h["lon"]), h) for h in HOSPITALS),
-        default=(None, None),
-        key=lambda x: x[0],
-    )
-    if best[0] is None:
+    best = min(points, key=lambda p: _meters(c[0], c[1], p["lat"], p["lon"]))
+    return best, round(_meters(c[0], c[1], best["lat"], best["lon"]))
+
+
+def nearest_school(listing: dict):
+    return _nearest(listing, SCHOOLS)
+
+
+def nearest_station(listing: dict):
+    return _nearest(listing, SUBWAY)
+
+
+def _point_in_ring(lon: float, lat: float, ring: list) -> bool:
+    """레이 캐스팅. ring은 [[lon, lat], ...]."""
+    inside = False
+    n = len(ring)
+    j = n - 1
+    for i in range(n):
+        xi, yi = ring[i]
+        xj, yj = ring[j]
+        if (yi > lat) != (yj > lat):
+            x_cross = (xj - xi) * (lat - yi) / ((yj - yi) or 1e-12) + xi
+            if lon < x_cross:
+                inside = not inside
+        j = i
+    return inside
+
+
+def dong_of(listing: dict):
+    """좌표가 속한 행정동 {code, name, gu}. 없으면 None."""
+    c = _coords(listing)
+    if not c:
+        return None
+    lat, lon = c
+    for d in DONG_BOUNDARY:
+        for r in d["rings"]:
+            b = r["bbox"]
+            if b[0] <= lon <= b[2] and b[1] <= lat <= b[3] and _point_in_ring(lon, lat, r["ring"]):
+                return {"code": d["code"], "name": d["name"], "gu": d["gu"]}
+    return None
+
+
+def dong_rent(listing: dict):
+    """행정동 1층 평당 월 환산임대료(원)와 동 이름. 없으면 (None, None).
+    환산임대료 = 보증금×12%/12 + 월세. 서울신용보증재단 추정치(우리마을가게 상권분석)."""
+    d = dong_of(listing)
+    if not d:
         return None, None
-    return best[1], round(best[0])
+    r = DONG_RENT.get(d["code"])
+    if not r:
+        return None, d["name"]
+    return r["rent"], d["name"]
+
+
+def location_tags(cfg: dict, listing: dict):
+    """입지 라벨 목록과 상세 줄. 거르지 않고 표시만 한다.
+    🏫 학교권 / 💸 싼동네 / 💰 비싼동네 / 🚫 위험입지(비싼 동 + 역 앞)"""
+    r = (cfg.get("realty") or {})
+    tags, lines = [], []
+    school, sd = nearest_school(listing)
+    station, td = nearest_station(listing)
+    rent, dong = dong_rent(listing)
+    if sd is not None and sd <= r.get("school_radius_m", 300):
+        tags.append("🏫 학교권")
+    if sd is not None and sd <= r.get("school_show_m", 450):
+        lines.append(f"🏫 {school['name']} {sd:,}m")
+    expensive = False
+    if rent:
+        man = rent / 10_000
+        if man <= r.get("rent_low_manwon_py", 13.0):
+            tags.append("💸 싼동네")
+        elif man >= r.get("rent_high_manwon_py", 15.6):
+            tags.append("💰 비싼동네")
+            expensive = True
+        lines.append(f"🏘 {dong} 1층 {man:.1f}만/평")
+    if station and td is not None:
+        if expensive and td <= r.get("station_radius_m", 364):
+            tags.append("🚫 위험입지")   # 비싼 동 + 역 앞: 3년 생존 37%
+        lines.append(f"🚇 {station['name']}역 {td:,}m")
+    return tags, lines
 
 # "음식점,카페,플라워샵은 안됩니다" / "카페 업종은 불가" 처럼 업종을 금지하는 문구를 걸러내기 위한 것.
 # 키워드 바로 뒤(같은 절, 10자 이내)에 부정 표현이 오면 그 등장은 매칭으로 치지 않는다.
