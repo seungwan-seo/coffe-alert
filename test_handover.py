@@ -65,6 +65,34 @@ def test_priority_order():
     return [] if order == ["b", "d", "a", "c", "plain-string"] else [("order", order)]
 
 
+def test_goods_flood():
+    """2026-08-24 실제 오탐: 번개 '카페 양도' 검색이 아이돌 생일카페 굿즈 양도로 도배.
+    require_any(권리금·보증금·머신·집기 등)가 이를 막는지 — 실제 신고된 제목들로 고정."""
+    import yaml
+    from datetime import datetime, timezone
+    cfg = yaml.safe_load(open("config.yaml", encoding="utf-8"))
+    now = datetime.now(timezone.utc).isoformat()
+    fails = []
+    for section in ("buysell", "bunjang"):
+        scs = [x for x in cfg[section]["searches"] if x.get("handover")]
+        if not any(x.get("require_any") for x in scs):
+            fails.append(f"{section}: handover 검색에 require_any 없음")
+        for sc in scs:
+            for t, want in [
+                ("보이넥스트도어 생일 카페 생카 특전 럭드 일괄 양도", "perm"),
+                ("하츠투하츠 태국 카페 포카 양도 분철", "perm"),
+                ("전독시 연남 굿즈모먼트 콜라보 카페 엽서 양도", "perm"),
+                ("플레이브 십카페 럭드 양도", "perm"),
+                ("무인카페 양도합니다. 메일빈 머신 포함, 보증금 1000/월세 60", "match"),
+                ("운영중인 카페 양도. 시설 집기 일체 포함, 매출 자료 공개", "match"),
+            ]:
+                v = matching.match_buysell(sc, {"status": "Ongoing", "created_at": now,
+                                                "price": 50000, "title": t, "content": ""}, 3)
+                if v != want:
+                    fails.append(f"{section}/{sc['keyword']}: '{t[:24]}' 기대 {want} 실제 {v}")
+    return fails
+
+
 def test_buysell_priority():
     import main
     hits = []
@@ -85,6 +113,7 @@ if __name__ == "__main__":
         failures.append(f"등급 기대 {want} / 실제 {got}: {body}")
     failures += [str(x) for x in test_priority_order()]
     failures += test_buysell_priority()
+    failures += test_goods_flood()
     if failures:
         print("FAIL")
         for f in failures:

@@ -405,6 +405,12 @@ def match_buysell(search_cfg: dict, item: dict, freshness_days: float = 3) -> st
     # 제외어가 있으면 그 부분을 지우고 판정한다 ("만화카페 폐업" 같은 다른 업종 걸러내기)
     for phrase in search_cfg.get("exclude_keywords") or []:
         text = text.replace(phrase, "")
+    # require_any: 이 중 하나는 본문에 있어야 통과 — "카페 양도" 검색이 아이돌 생일카페
+    # 굿즈 양도(특전·포카·럭드)에 도배되는 문제(2026-08-24). 진짜 점포 양도 글에는
+    # 권리금·보증금·머신·집기 같은 단어가 반드시 나온다.
+    req = search_cfg.get("require_any") or []
+    if req and not any(k in text for k in req):
+        return "perm"   # 조건 미달은 영구 탈락 — 같은 굿즈 글이 계속 재평가되지 않게
     phrases = [search_cfg["keyword"]] + (search_cfg.get("aliases") or [])
     for phrase in phrases:
         tokens = phrase.split()
