@@ -128,6 +128,11 @@ def realty_alert_text(listing: dict, rule: str, cfg: dict = None) -> str:
         except ValueError:
             pass
     extras.append("중개사" if listing.get("broker") else "직거래")
+    if cfg:
+        # ☕ 필요잔수 — 🔴끼리도 크기 비교가 되게 상시 표시. +α = 관리비 별도(금액 미상)
+        bl = matching.budget_line(cfg, listing)
+        if bl:
+            extras.append(bl)
     parts.append(e(" · ".join(extras)))
     if loc_lines:
         parts.append(e(" · ".join(loc_lines)))
@@ -191,6 +196,8 @@ def run_realty(cfg: dict, state: dict, alerts: list, now: float) -> None:
                 "ts": time.time(),
                 "url": listing["url"],
                 "label": f"[{listing['category']}] {listing['region']}",
+                # 라벨 임계 재캘리브레이션용 — 필요잔수 분포를 권리금 포함으로 다시 뽑기 위해 저장
+                "premium": listing.get("premium_money"),
             }
 
     # 레인 1: 서울 25개 구 카테고리 페이지 (빠른 감지)
@@ -630,9 +637,11 @@ def main() -> None:
             failed.append(alert)   # 토큰 미설정 — 유실 방지를 위해 보관
             continue
         try:
-            # 일반 알림은 무음(폰이 안 울림), 양도·브리핑·가격인하 등은 소리 나게
+            # 일반 알림은 무음(폰이 안 울림), 양도·브리핑·가격인하·💚최적은 소리 나게
+            # (💚 무인카페 최적은 첫 줄 라벨에만 등장 — 드물게 뜨는 "무조건 열어봐" 신호)
+            first_line = alert.get("text", "").split("\n", 1)[0] if isinstance(alert, dict) else ""
             silent = silent_others and isinstance(alert, dict) and alert_priority(alert) == 0 \
-                and not alert.get("text", "").startswith("💰")
+                and not alert.get("text", "").startswith("💰") and "💚" not in first_line
             notifier.send_alert(alert, silent=silent)
         except Exception as e:
             print(f"[전송 실패, 다음 실행에 재시도] {e}")

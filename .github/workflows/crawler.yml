@@ -45,6 +45,10 @@ jobs:
       - name: Test location labels
         run: python test_location.py
 
+      # 예산 라벨 회귀 테스트 (필요잔수 공식·등급 게이트·평당 시세 비교 단위)
+      - name: Test budget labels
+        run: python test_budget.py
+
       - name: Run crawler
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}

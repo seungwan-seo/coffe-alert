@@ -101,6 +101,30 @@ def dong_rent(listing: dict):
     return r["rent"], d["name"]
 
 
+def listing_rent_per_py(cfg: dict, listing: dict):
+    """이 매물의 평당 월 환산임대료(만원). 동 평균과 같은 환산식(보증금×12%/12 + 월세)이라
+    직접 비교 가능 — "시세 대비 싸게 나왔나"가 인수 전략의 핵심 신호다.
+    동 평균이 1층 기준이라 1층 매물만, 면적 이상치(3~30평 밖)와 결측은 None."""
+    r = (cfg.get("realty") or {})
+    try:
+        if float(listing.get("floor")) != 1.0:   # floor는 문자열 '1.0'/'0.5'(반지하)/None
+            return None
+    except (TypeError, ValueError):
+        return None
+    try:
+        py = float(listing.get("area_m2")) / 3.3058
+    except (TypeError, ValueError):
+        return None
+    if not (r.get("compare_py_min", 3.0) <= py <= r.get("compare_py_max", 30.0)):
+        return None
+    allowed = r.get("trade_types")
+    monthly = rent_manwon(listing, allowed)
+    if monthly is None:
+        return None
+    deposit = deposit_manwon(listing, allowed) or 0
+    return (monthly + deposit * 0.01) / py
+
+
 def location_tags(cfg: dict, listing: dict):
     """입지 라벨 목록과 상세 줄. 거르지 않고 표시만 한다.
     🏫 학교권 / 💸 싼동네 / 💰 비싼동네 / 🚫 위험입지(비싼 동 + 역 앞)"""
@@ -115,13 +139,17 @@ def location_tags(cfg: dict, listing: dict):
         lines.append(f"🏫 {school['name']} {sd:,}m")
     expensive = False
     if rent:
-        man = rent / 10_000
+        man = rent / 10_000   # dong_rent.json은 원 단위 — 매물 쪽(만원)과 단위를 맞춘다
         if man <= r.get("rent_low_manwon_py", 13.0):
             tags.append("💸 싼동네")
         elif man >= r.get("rent_high_manwon_py", 15.6):
             tags.append("💰 비싼동네")
             expensive = True
-        lines.append(f"🏘 {dong} 1층 {man:.1f}만/평")
+        line = f"🏘 {dong} 1층 {man:.1f}만/평"
+        per_py = listing_rent_per_py(cfg, listing)
+        if per_py:
+            line += f" · 이 매물 {per_py:.1f}만 ({(per_py / man - 1) * 100:+.0f}%)"
+        lines.append(line)
     if station and td is not None:
         if expensive and td <= r.get("station_radius_m", 364):
             tags.append("🚫 위험입지")   # 비싼 동 + 역 앞: 3년 생존 37%
@@ -292,24 +320,73 @@ def facility_tag(listing: dict) -> str:
     return "🚧 빈상가"
 
 
-def budget_tag(cfg: dict, listing: dict) -> str:
-    """예산 라벨. 거르지 않고 표시만 한다."""
+def breakeven_cups(cfg: dict, listing: dict):
+    """하루 몇 잔을 팔아야 회수기한 안에 본전인지 (필요잔수). 월세가 없으면 None.
+    필요잔수 = (월세 + 월 고정비 + (권리금+기준투자)/회수개월) ÷ (잔당 공헌이익 × 30일)
+    - 잔당 공헌이익 1,300원 = STRATEGY §12. 월 환산 3.9만/잔
+    - 보증금은 반환금이라 넣지 않는다 (STRATEGY §11 — 투자손실 계산과 분리)
+    - 권리금은 비회수 투자라 회수기한(§17 상한 18개월)으로 나눠 월 부담에 가산
+    검산 앵커: 월세 75/권리금 0 → 39.9잔 (40잔 본전선), 월세 114 → 50.0잔"""
     b = (cfg.get("realty") or {}).get("budget") or {}
-    if not b:
-        return ""
     allowed = (cfg.get("realty") or {}).get("trade_types")
     monthly = rent_manwon(listing, allowed)
     if monthly is None:
+        return None
+    premium = listing.get("premium_money") or 0
+    fixed = b.get("fixed_cost_manwon", 25)
+    invest = premium + b.get("base_invest_manwon", 1000)
+    margin = b.get("cup_margin_won", 1300) * 30 / 10_000   # 만원/잔·월
+    return (monthly + fixed + invest / b.get("payback_months", 18)) / margin
+
+
+def optimal_location(cfg: dict, listing: dict) -> bool:
+    """생존분석 최적 프로파일: 싼 동(동 임대료 하위 기준) + 초중고 도보권.
+    두 조건을 다 갖춘 매장들의 3년 생존이 기준 대비 +11~12%p로 가장 높았다.
+    좌표가 없으면 False (판정 불가는 최적이 아님)."""
+    r = (cfg.get("realty") or {})
+    rent, _ = dong_rent(listing)
+    if not rent or rent / 10_000 > r.get("rent_low_manwon_py", 13.0):
+        return False
+    _, sd = nearest_school(listing)
+    return sd is not None and sd <= r.get("school_radius_m", 300)
+
+
+def budget_tag(cfg: dict, listing: dict) -> str:
+    """예산 라벨. 거르지 않고 표시만 한다.
+    💚는 예산과 입지가 모두 최적 프로파일일 때만 붙는 종합 판정 — 드물게 뜨는 게 정상.
+    🟡/🔴 경계는 필요잔수 기준 (50잔 = 목표 상단, 권리금 0이면 월세 ~114만 상당)."""
+    b = (cfg.get("realty") or {}).get("budget") or {}
+    if not b:
+        return ""
+    cups = breakeven_cups(cfg, listing)
+    if cups is None:
         return "⚪ 금액미상"
+    allowed = (cfg.get("realty") or {}).get("trade_types")
     deposit = deposit_manwon(listing, allowed) or 0
     premium = listing.get("premium_money") or 0
-    if (monthly <= b.get("starter_monthly", 60)
-            and deposit <= b.get("starter_deposit", 1000)
-            and premium <= b.get("starter_premium", 300)):
-        return "💚 소액창업"
-    if monthly <= b.get("review_monthly", 120):
+    if (cups <= b.get("green_cups", 40)
+            and deposit <= b.get("green_deposit", 2000)
+            and premium <= b.get("green_premium", 300)      # §11 권리금 0~300 상한 유지
+            and optimal_location(cfg, listing)):
+        return "💚 무인카페 최적"
+    if cups <= b.get("review_cups", 50):
         return "🟡 검토"
     return "🔴 예산초과"
+
+
+# 관리비가 월세에 안 들어 있다는 신호 — 금액을 모르니 필요잔수에 +α로만 표시.
+# "관리비 없음/포함"은 매칭하지 않게 별도·숫자만 잡는다 (정밀도 우선).
+MAINT_EXTRA_RE = re.compile(r"관리비\s*(?:별도|\d)")
+
+
+def budget_line(cfg: dict, listing: dict) -> str:
+    """'☕ 본전 ~N잔/일' 표시 줄. 등급과 같은 값을 정수 올림으로 보여준다.
+    🔴끼리도 이 숫자로 크기를 비교할 수 있게 상시 표시."""
+    cups = breakeven_cups(cfg, listing)
+    if cups is None:
+        return ""
+    extra = "+α" if MAINT_EXTRA_RE.search(listing.get("content") or "") else ""
+    return f"☕ 본전 ~{math.ceil(cups)}잔/일{extra}"
 
 
 def _keyword_hit(text: str, keywords: list, excludes: list) -> bool:
