@@ -99,7 +99,7 @@ def realty_alert_text(listing: dict, rule: str, cfg: dict = None) -> str:
     if cfg:
         tags.append(matching.facility_tag(listing))   # 시설이 있는지가 STRATEGY상 1순위
         tags.append(matching.budget_tag(cfg, listing))
-        # 입지: 🏫학교권 / 💸싼동네 / 💰비싼동네 / 🚫위험입지 (2026-08-24 전수 생존분석 기반)
+        # 입지: 🏘️대단지학교권 / 🏫학교권 / 💸싼동네 / 💰비싼동네 / 🚫위험입지
         loc_tags, loc_lines = matching.location_tags(cfg, listing)
         tags.extend(loc_tags)
     head = f"🏠 <b>[{e(listing['category'])} · {e(daangn_realty.fmt_trade(shown))}]</b> {e(listing['region'])}"

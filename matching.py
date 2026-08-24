@@ -4,12 +4,14 @@ import math
 import os
 import re
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 
 # ── 입지 데이터 (2026-08-24 서울 무인카페 2019~22 개업 487건 장기생존/조기폐업 분석 기반) ──
-# 갈린 변수: ① 초중고 450m 안에 없으면 3년 생존 44% vs 72% (가장 단단함, 임대료·구·코호트 통제해도 유지)
+# 갈린 변수: ① 학교 450m + 아파트 600m 2,000세대: 둘 다 75%, 학교만 65%, 세대만 43%, 둘 다 없음 46%
 #           ② 행정동 1층 평당 환산임대료 상위 1/3(≥15.6만)이면 52% vs 76%
 #           ③ 비싼 동 + 역 364m 안 = 37% (역세권은 비싼 동에서만 나쁘다; 싼 동에선 80 vs 80)
-# 안 갈린 변수: 무인카페 이웃 수, 동 인구, 층, 아파트 단지 상가, 저가 프랜차이즈, 대학, **대형병원**
+# 안 갈린 변수: 무인카페 이웃 수, 동 인구, 층, '주소상 아파트 단지 상가 여부', 저가 프랜차이즈, 대학, **대형병원**
+# 주의: 주소상 상가 플래그와 실제 주변 세대수는 다른 변수다. 후자는 학교와 결합될 때 차이가 났다.
 # → 🏥 병원세권 라벨은 근거가 없어 제거했다(병원 600m 내 58%, 오히려 낮은 쪽).
 _HERE = os.path.dirname(__file__)
 
@@ -23,6 +25,7 @@ def _load_json(name, default):
 
 
 SCHOOLS = _load_json("schools.json", [])          # 초중고 2,131곳 (OSM, 서울)
+APARTMENTS = _load_json("apartments.json", [])    # 서울 공동주택 2,807단지 (서울 열린데이터광장)
 SUBWAY = _load_json("subway.json", [])            # 지하철역 369곳 (서울시 역사마스터, 역명 기준 중복 제거)
 DONG_RENT = _load_json("dong_rent.json", {})      # 행정동코드(8자리) → {name, gu, rent(원/3.3㎡/월, 1층 환산), q}
 DONG_BOUNDARY = _load_json("dong_boundary.json", [])   # 행정동 외곽 링 (점-폴리곤용)
@@ -57,6 +60,23 @@ def nearest_school(listing: dict):
 
 def nearest_station(listing: dict):
     return _nearest(listing, SUBWAY)
+
+
+@lru_cache(maxsize=4096)
+def _apartment_households_at(lat: float, lon: float, radius_m: float) -> int:
+    return sum(
+        int(a.get("hh") or 0)
+        for a in APARTMENTS
+        if _meters(lat, lon, a["lat"], a["lon"]) <= radius_m
+    )
+
+
+def apartment_households(listing: dict, radius_m: float = 600):
+    """매물 반경 안 공동주택 세대수. 좌표나 데이터가 없으면 None."""
+    c = _coords(listing)
+    if not c or not APARTMENTS:
+        return None
+    return _apartment_households_at(c[0], c[1], radius_m)
 
 
 def _point_in_ring(lon: float, lat: float, ring: list) -> bool:
@@ -127,16 +147,24 @@ def listing_rent_per_py(cfg: dict, listing: dict):
 
 def location_tags(cfg: dict, listing: dict):
     """입지 라벨 목록과 상세 줄. 거르지 않고 표시만 한다.
-    🏫 학교권 / 💸 싼동네 / 💰 비싼동네 / 🚫 위험입지(비싼 동 + 역 앞)"""
+    🏘️ 대단지학교권 / 🏫 학교권 / 💸 싼동네 / 💰 비싼동네 / 🚫 위험입지"""
     r = (cfg.get("realty") or {})
     tags, lines = [], []
     school, sd = nearest_school(listing)
     station, td = nearest_station(listing)
     rent, dong = dong_rent(listing)
-    if sd is not None and sd <= r.get("school_radius_m", 300):
+    apartment_radius = r.get("apartment_radius_m", 600)
+    households = apartment_households(listing, apartment_radius)
+    school_near = sd is not None and sd <= r.get("school_radius_m", 450)
+    dense_apartments = households is not None and households >= r.get("apartment_min_households", 2000)
+    if school_near and dense_apartments:
+        tags.append("🏘️ 대단지학교권")
+    elif school_near:
         tags.append("🏫 학교권")
     if sd is not None and sd <= r.get("school_show_m", 450):
         lines.append(f"🏫 {school['name']} {sd:,}m")
+    if households is not None:
+        lines.append(f"🏢 배후 {apartment_radius:,}m {households:,}세대")
     expensive = False
     if rent:
         man = rent / 10_000   # dong_rent.json은 원 단위 — 매물 쪽(만원)과 단위를 맞춘다
@@ -340,15 +368,19 @@ def breakeven_cups(cfg: dict, listing: dict):
 
 
 def optimal_location(cfg: dict, listing: dict) -> bool:
-    """생존분석 최적 프로파일: 싼 동(동 임대료 하위 기준) + 초중고 도보권.
-    두 조건을 다 갖춘 매장들의 3년 생존이 기준 대비 +11~12%p로 가장 높았다.
+    """생존분석 최적 프로파일: 싼 동 + 학교 도보권 + 배후 공동주택 세대수.
+    학교와 세대수는 단독보다 결합됐을 때 생존율이 높았다.
     좌표가 없으면 False (판정 불가는 최적이 아님)."""
     r = (cfg.get("realty") or {})
     rent, _ = dong_rent(listing)
     if not rent or rent / 10_000 > r.get("rent_low_manwon_py", 13.0):
         return False
     _, sd = nearest_school(listing)
-    return sd is not None and sd <= r.get("school_radius_m", 300)
+    households = apartment_households(listing, r.get("apartment_radius_m", 600))
+    return (sd is not None
+            and sd <= r.get("school_radius_m", 450)
+            and households is not None
+            and households >= r.get("apartment_min_households", 2000))
 
 
 def budget_tag(cfg: dict, listing: dict) -> str:

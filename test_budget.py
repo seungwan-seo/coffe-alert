@@ -24,7 +24,7 @@ def listing(monthly=None, deposit=0, premium=0, lat=None, lon=None,
     return L
 
 
-# 싼 동(성현동 11.0만/평) + 초중고 0m — 입지 최적 프로파일 기준점 (구암중학교 좌표)
+# 싼 동(성현동 11.0만/평) + 초중고 0m + 배후 12,000세대 — 입지 최적 기준점
 OPT = {"lat": 37.49268, "lon": 126.94815}
 # 비싼 동(역삼1동) — 입지 최적이 아님 (test_location과 같은 기준점)
 EXP = {"lat": 37.50062, "lon": 127.03641}
@@ -56,7 +56,7 @@ def run():
     check("월세 75 (입지 미상)", matching.budget_tag(c, listing(75, 1000)), "🟡 검토")
     check("월세 120", matching.budget_tag(c, listing(120, 2000)), "🔴 예산초과")
     check("금액 없음", matching.budget_tag(c, listing()), "⚪ 금액미상")
-    # 💚 = 예산 + 입지(싼동네+학교) 모두 최적
+    # 💚 = 예산 + 입지(싼동네+학교+배후 2,000세대) 모두 최적
     check("최적 입지+예산", matching.budget_tag(c, listing(60, 1000, premium=200, **OPT)), "💚 무인카페 최적")
     check("최적 입지, 권리금 초과", matching.budget_tag(c, listing(30, 500, premium=400, **OPT)), "🟡 검토")
     check("최적 입지, 보증금 초과", matching.budget_tag(c, listing(60, 3000, **OPT)), "🟡 검토")

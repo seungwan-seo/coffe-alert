@@ -44,6 +44,8 @@ python main.py --dry-run     # 텔레그램 없이 콘솔 출력
 
 `seoul_regions.json`(중고거래용 동 id 목록)은 커밋돼 있음. 갱신이 필요하면 `python discover_regions.py`.
 
+입지 라벨은 `schools.json`, `apartments.json`, `subway.json`, `dong_rent.json`, `dong_boundary.json`을 사용한다. 공동주택 데이터는 [서울 열린데이터광장 공동주택 정보(OA-15818)](https://data.seoul.go.kr/dataList/OA-15818/S/1/datasetView.do)의 좌표·세대수만 최소화한 것이며, 원자료를 갱신한 뒤 `python build_apartments.py 원자료.csv`로 다시 만들 수 있다.
+
 ## 주의
 
 - 개인 알림 용도로만 쓸 것. 당근 이용약관은 자동화 수집을 금지하므로 수집물 재배포/상업 이용 금지.
