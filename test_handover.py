@@ -74,6 +74,17 @@ def test_goods_flood():
     now = datetime.now(timezone.utc).isoformat()
     fails = []
     for section in ("buysell", "bunjang"):
+        # "카페 폐업" 검색(별칭 "카페 정리")도 굿즈 "정리" 글을 통과시키면 안 된다 (2026-08-24 2차 구멍)
+        pb = next(x for x in cfg[section]["searches"] if x["keyword"] == "카페 폐업")
+        for t2, want2 in [
+            ("아이브 생일카페 특전 굿즈 정리합니다", "perm"),
+            ("세븐틴 생카 컵홀더 카페 굿즈 일괄 정리", "perm"),
+            ("카페 폐업 정리 - 제빙기 커피머신 테이블 일괄", "match"),
+        ]:
+            v2 = matching.match_buysell(pb, {"status": "Ongoing", "created_at": now,
+                                             "price": 10000, "title": t2, "content": ""}, 3)
+            if v2 != want2:
+                fails.append(f"{section}/카페 폐업: '{t2[:24]}' 기대 {want2} 실제 {v2}")
         scs = [x for x in cfg[section]["searches"] if x.get("handover")]
         if not any(x.get("require_any") for x in scs):
             fails.append(f"{section}: handover 검색에 require_any 없음")
