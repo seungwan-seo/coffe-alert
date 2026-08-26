@@ -99,7 +99,8 @@ def realty_alert_text(listing: dict, rule: str, cfg: dict = None) -> str:
     if cfg:
         tags.append(matching.facility_tag(listing))   # 시설이 있는지가 STRATEGY상 1순위
         tags.append(matching.budget_tag(cfg, listing))
-        # 입지: 🏘️대단지학교권 / 🏫학교권 / 💸싼동네 / 💰비싼동네 / 🚫위험입지
+        # 입지: 🏘️대단지학교권 / 🏫학교권 / 💸저임대 생활권
+        # (고임대 상업지는 match_realty 1차 필터에서 이미 제외)
         loc_tags, loc_lines = matching.location_tags(cfg, listing)
         tags.extend(loc_tags)
     head = f"🏠 <b>[{e(listing['category'])} · {e(daangn_realty.fmt_trade(shown))}]</b> {e(listing['region'])}"
@@ -129,7 +130,7 @@ def realty_alert_text(listing: dict, rule: str, cfg: dict = None) -> str:
             pass
     extras.append("중개사" if listing.get("broker") else "직거래")
     if cfg:
-        # ☕ 필요잔수 — 🔴끼리도 크기 비교가 되게 상시 표시. +α = 관리비 별도(금액 미상)
+        # ☕ 필요잔수 — 통과 매물의 손익 여유를 표시. +α = 관리비 별도(금액 미상)
         bl = matching.budget_line(cfg, listing)
         if bl:
             extras.append(bl)
@@ -297,8 +298,14 @@ def run_realty(cfg: dict, state: dict, alerts: list, now: float) -> None:
             if listing is None:   # 삭제/거래완료 — 추적 종료
                 state["realty_watch"].pop(article_id, None)
                 continue
+            # 필터 개편 전에 등록된 추적 매물도 고임대 상업지에서는 더 알리지 않는다.
+            if not matching.passes_location_filter(cfg, listing):
+                state["realty_watch"].pop(article_id, None)
+                continue
             new_snap = daangn_realty.trade_snapshot(listing["trades"])
-            if daangn_realty.is_price_drop(entry["trade"], new_snap):
+            # 예산초과 상태의 인하는 조용히 추적하다가 50잔/일 선 안으로 들어왔을 때만 알린다.
+            if (daangn_realty.is_price_drop(entry["trade"], new_snap)
+                    and matching.passes_budget_filter(cfg, listing)):
                 before = daangn_realty.fmt_trade([entry["trade"]])
                 after = daangn_realty.fmt_trade([new_snap])
                 add_alert(state, alerts, "drop",

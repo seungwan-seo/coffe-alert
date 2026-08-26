@@ -24,9 +24,9 @@ def listing(monthly=None, deposit=0, premium=0, lat=None, lon=None,
     return L
 
 
-# 싼 동(성현동 11.0만/평) + 초중고 0m + 배후 12,000세대 — 입지 최적 기준점
+# 저임대 생활권(11.0만/평) + 초중고 0m + 배후 12,000세대 — 입지 최적 기준점
 OPT = {"lat": 37.49268, "lon": 126.94815}
-# 비싼 동(역삼1동) — 입지 최적이 아님 (test_location과 같은 기준점)
+# 고임대 상업지 — 입지 최적이 아님 (test_location과 같은 기준점)
 EXP = {"lat": 37.50062, "lon": 127.03641}
 
 
@@ -56,11 +56,40 @@ def run():
     check("월세 75 (입지 미상)", matching.budget_tag(c, listing(75, 1000)), "🟡 검토")
     check("월세 120", matching.budget_tag(c, listing(120, 2000)), "🔴 예산초과")
     check("금액 없음", matching.budget_tag(c, listing()), "⚪ 금액미상")
-    # 💚 = 예산 + 입지(싼동네+학교+배후 2,000세대) 모두 최적
+    # 💚 = 예산 + 입지(저임대 생활권+학교+배후 2,000세대) 모두 최적
     check("최적 입지+예산", matching.budget_tag(c, listing(60, 1000, premium=200, **OPT)), "💚 무인카페 최적")
     check("최적 입지, 권리금 초과", matching.budget_tag(c, listing(30, 500, premium=400, **OPT)), "🟡 검토")
     check("최적 입지, 보증금 초과", matching.budget_tag(c, listing(60, 3000, **OPT)), "🟡 검토")
-    check("비싼 동, 예산은 통과", matching.budget_tag(c, listing(60, 1000, **EXP)), "🟡 검토")
+    check("고임대 상업지, 예산 자체는 통과", matching.budget_tag(c, listing(60, 1000, **EXP)), "🟡 검토")
+
+    # ── 2단 실제 필터 ──
+    if not matching.passes_budget_filter(c, listing(114, 1000)):
+        fails.append("50잔/일 검토 상한 매물이 2차 손익 필터에서 탈락함")
+    if matching.passes_budget_filter(c, listing(120, 1000)):
+        fails.append("50잔/일 초과 매물이 2차 손익 필터를 통과함")
+    if not matching.passes_budget_filter(c, listing()):
+        fails.append("금액 없는 판정불가 매물이 2차 손익 필터에서 탈락함")
+
+    def matchable(monthly=None, deposit=1000, **kwargs):
+        L = listing(monthly, deposit, **kwargs)
+        L.update({
+            "address": "서울특별시 관악구 테스트동",
+            "category": "상가",
+            "content": "카페 운영 가능한 상가",
+            "published_at": "",
+        })
+        return L
+
+    if not matching.match_realty(c, matchable(75, **OPT)):
+        fails.append("생활권형+40잔/일 매물이 2단 필터에서 탈락함")
+    if matching.match_realty(c, matchable(60, **EXP)) is not None:
+        fails.append("고임대 상업지 매물이 1차 입지 필터를 통과함")
+    if matching.match_realty(c, matchable(120, **OPT)) is not None:
+        fails.append("저임대 생활권의 예산초과 매물이 2차 손익 필터를 통과함")
+    if matching.match_realty(c, matchable(250, **EXP)) is not None:
+        fails.append("고임대 상업지+85잔/일 매물이 2단 필터를 통과함")
+    if not matching.match_realty(c, matchable(75, lat=None, lon=None)):
+        fails.append("입지 판정불가 매물이 보수적 예외를 통과하지 못함")
 
     # ── 표시 줄 ──
     check("본전 줄", matching.budget_line(c, listing(75, 1000)), "☕ 본전 ~40잔/일")

@@ -9,7 +9,7 @@ from functools import lru_cache
 # ── 입지 데이터 (2026-08-24 서울 무인카페 2019~22 개업 487건 장기생존/조기폐업 분석 기반) ──
 # 갈린 변수: ① 학교 450m + 아파트 600m 2,000세대: 둘 다 75%, 학교만 65%, 세대만 43%, 둘 다 없음 46%
 #           ② 행정동 1층 평당 환산임대료 상위 1/3(≥15.6만)이면 52% vs 76%
-#           ③ 비싼 동 + 역 364m 안 = 37% (역세권은 비싼 동에서만 나쁘다; 싼 동에선 80 vs 80)
+#           ③ 고임대 상업지 + 역 364m 안 = 37% (역세권은 고임대권에서만 나쁘다; 저임대권에선 80 vs 80)
 # 안 갈린 변수: 무인카페 이웃 수, 동 인구, 층, '주소상 아파트 단지 상가 여부', 저가 프랜차이즈, 대학, **대형병원**
 # 주의: 주소상 상가 플래그와 실제 주변 세대수는 다른 변수다. 후자는 학교와 결합될 때 차이가 났다.
 # → 🏥 병원세권 라벨은 근거가 없어 제거했다(병원 600m 내 58%, 오히려 낮은 쪽).
@@ -146,8 +146,8 @@ def listing_rent_per_py(cfg: dict, listing: dict):
 
 
 def location_tags(cfg: dict, listing: dict):
-    """입지 라벨 목록과 상세 줄. 거르지 않고 표시만 한다.
-    🏘️ 대단지학교권 / 🏫 학교권 / 💸 싼동네 / 💰 비싼동네 / 🚫 위험입지"""
+    """입지 라벨 목록과 상세 줄.
+    🏘️ 대단지학교권 / 🏫 학교권 / 💸 저임대 생활권 / 💰 고임대 상업지 / 🚫 위험입지"""
     r = (cfg.get("realty") or {})
     tags, lines = [], []
     school, sd = nearest_school(listing)
@@ -169,9 +169,9 @@ def location_tags(cfg: dict, listing: dict):
     if rent:
         man = rent / 10_000   # dong_rent.json은 원 단위 — 매물 쪽(만원)과 단위를 맞춘다
         if man <= r.get("rent_low_manwon_py", 13.0):
-            tags.append("💸 싼동네")
+            tags.append("💸 저임대 생활권")
         elif man >= r.get("rent_high_manwon_py", 15.6):
-            tags.append("💰 비싼동네")
+            tags.append("💰 고임대 상업지")
             expensive = True
         line = f"🏘 {dong} 1층 {man:.1f}만/평"
         per_py = listing_rent_per_py(cfg, listing)
@@ -180,7 +180,7 @@ def location_tags(cfg: dict, listing: dict):
         lines.append(line)
     if station and td is not None:
         if expensive and td <= r.get("station_radius_m", 364):
-            tags.append("🚫 위험입지")   # 비싼 동 + 역 앞: 3년 생존 37%
+            tags.append("🚫 위험입지")   # 고임대 상업지 + 역 앞: 3년 생존 37%
         lines.append(f"🚇 {station['name']}역 {td:,}m")
     return tags, lines
 
@@ -368,7 +368,7 @@ def breakeven_cups(cfg: dict, listing: dict):
 
 
 def optimal_location(cfg: dict, listing: dict) -> bool:
-    """생존분석 최적 프로파일: 싼 동 + 학교 도보권 + 배후 공동주택 세대수.
+    """생존분석 최적 프로파일: 저임대 생활권 + 학교 도보권 + 배후 공동주택 세대수.
     학교와 세대수는 단독보다 결합됐을 때 생존율이 높았다.
     좌표가 없으면 False (판정 불가는 최적이 아님)."""
     r = (cfg.get("realty") or {})
@@ -383,8 +383,33 @@ def optimal_location(cfg: dict, listing: dict) -> bool:
             and households >= r.get("apartment_min_households", 2000))
 
 
+def passes_location_filter(cfg: dict, listing: dict) -> bool:
+    """1차 입지 필터: 고임대 상업지(행정동 상위 1/3)는 제외한다.
+
+    좌표나 행정동 임대료가 없으면 파싱/데이터 누락 때문에 좋은 매물을 잃지 않도록
+    통과시킨다. 알려진 값이 기준 이상일 때만 확정 탈락한다.
+    """
+    r = (cfg.get("realty") or {})
+    rent, _ = dong_rent(listing)
+    if rent is None:
+        return True
+    return rent / 10_000 < r.get("rent_high_manwon_py", 15.6)
+
+
+def passes_budget_filter(cfg: dict, listing: dict) -> bool:
+    """2차 손익 필터: 목표 상단(기본 50잔/일) 안에서 본전이 나는 매물만 통과.
+
+    월세를 파싱하지 못한 매물은 확인 기회를 남기기 위해 통과시키고 ⚪로 표시한다.
+    """
+    b = (cfg.get("realty") or {}).get("budget") or {}
+    if not b:
+        return True
+    cups = breakeven_cups(cfg, listing)
+    return cups is None or cups <= b.get("review_cups", 50)
+
+
 def budget_tag(cfg: dict, listing: dict) -> str:
-    """예산 라벨. 거르지 않고 표시만 한다.
+    """예산 라벨. 실제 알림은 passes_budget_filter를 통과한 뒤 이 라벨을 표시한다.
     💚는 예산과 입지가 모두 최적 프로파일일 때만 붙는 종합 판정 — 드물게 뜨는 게 정상.
     🟡/🔴 경계는 필요잔수 기준 (50잔 = 목표 상단, 권리금 0이면 월세 ~114만 상당)."""
     b = (cfg.get("realty") or {}).get("budget") or {}
@@ -413,7 +438,7 @@ MAINT_EXTRA_RE = re.compile(r"관리비\s*(?:별도|\d)")
 
 def budget_line(cfg: dict, listing: dict) -> str:
     """'☕ 본전 ~N잔/일' 표시 줄. 등급과 같은 값을 정수 올림으로 보여준다.
-    🔴끼리도 이 숫자로 크기를 비교할 수 있게 상시 표시."""
+    정상 알림은 50잔 이하만 통과하지만 수동 분석에서도 같은 계산값을 쓴다."""
     cups = breakeven_cups(cfg, listing)
     if cups is None:
         return ""
@@ -440,7 +465,7 @@ def _keyword_hit(text: str, keywords: list, excludes: list) -> bool:
 
 def match_realty(cfg: dict, listing: dict):
     """listing: daangn_realty.fetch_article() 결과.
-    통과하면 매칭된 규칙 이름, 아니면 None."""
+    입지→손익 2단 필터와 키워드 규칙을 모두 통과하면 규칙 이름, 아니면 None."""
     r = cfg["realty"]
     address = listing.get("address") or ""
     if r["regions"] and not any(address.startswith(reg) for reg in r["regions"]):
@@ -454,10 +479,12 @@ def match_realty(cfg: dict, listing: dict):
         if kinds and not (kinds & set(allowed)):
             return None
 
-    # 월세 상한 — 하루 50잔(월 공헌이익 195만원)으로도 계산이 안 서는 구간은 버린다
-    cap = r.get("max_monthly_manwon") or 0
-    monthly = rent_manwon(listing, allowed)
-    if cap and monthly is not None and monthly > cap:
+    # 1차: 무인카페 생존율이 낮은 고임대 상업지(행정동 상위 1/3) 제외
+    if not passes_location_filter(cfg, listing):
+        return None
+
+    # 2차: 통과한 생활권 안에서도 목표 상단(50잔/일)을 넘는 매물 제외
+    if not passes_budget_filter(cfg, listing):
         return None
 
     # 구 페이지 큐레이션이 바뀌며 한참 전 매물이 갑자기 노출될 수 있다 — 오래된 건 조용히 넘어감

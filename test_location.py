@@ -50,17 +50,25 @@ def run():
         tags, lines = matching.location_tags(c, {"lat": lat, "lon": lon})
         if "🏘️ 대단지학교권" not in tags or not any(x.startswith("🏢 배후 600m") for x in lines):
             fails.append(f"{name}: 대단지학교권/배후세대 줄 기대 / 실제 {tags} {lines}")
-    # 라벨 조합: 비싼 동 + 역 앞 → 🚫, 싼 동 → 💸
+    # 라벨 조합과 1차 실제 필터: 고임대 상업지+역 앞 → 🚫/탈락, 저임대 생활권 → 통과
     tags, _ = matching.location_tags(c, {"lat": 37.50062, "lon": 127.03641})
-    if "🚫 위험입지" not in tags or "💰 비싼동네" not in tags:
-        fails.append(f"역삼역 앞: 🚫/💰 기대 / 실제 {tags}")
-    tags, _ = matching.location_tags(c, {"lat": 37.48893, "lon": 126.95715})   # 관악 성현동 (1층 11.0만/평)
-    if "💸 싼동네" not in tags or "🚫 위험입지" in tags:
-        fails.append(f"성현동: 💸 기대 / 실제 {tags}")
+    if "🚫 위험입지" not in tags or "💰 고임대 상업지" not in tags:
+        fails.append(f"역삼역 앞: 🚫/고임대 상업지 기대 / 실제 {tags}")
+    if matching.passes_location_filter(c, {"lat": 37.50062, "lon": 127.03641}):
+        fails.append("고임대 상업지가 1차 입지 필터를 통과함")
+    low = {"lat": 37.48893, "lon": 126.95715}   # 저임대 기준점 (1층 11.0만/평)
+    tags, _ = matching.location_tags(c, low)
+    if "💸 저임대 생활권" not in tags or "🚫 위험입지" in tags:
+        fails.append(f"저임대 생활권: 💸 기대 / 실제 {tags}")
+    if not matching.passes_location_filter(c, low):
+        fails.append("저임대 생활권이 1차 입지 필터에서 탈락함")
     # 좌표 없는 매물은 조용히 빈 결과
-    tags, lines = matching.location_tags(c, {"lat": None, "lon": None})
+    unknown = {"lat": None, "lon": None}
+    tags, lines = matching.location_tags(c, unknown)
     if tags or lines:
         fails.append("좌표 없는 매물에 입지 라벨이 붙음")
+    if not matching.passes_location_filter(c, unknown):
+        fails.append("좌표 없는 판정불가 매물이 1차 필터에서 탈락함")
     return fails
 
 
