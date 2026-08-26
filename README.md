@@ -22,6 +22,11 @@
 
 비전공자용 동작 설명은 [NOTICE.md](NOTICE.md) (그룹 공지에 붙여넣는 용도).
 
+입지·투자 판단 근거:
+
+- [STRATEGY.md](STRATEGY.md) — 기존 카페 양도 인수 후 무인화 전략
+- [LOW_COST_COHORT.md](LOW_COST_COHORT.md) — 컴포즈·메가 등 저가커피 점포 생존, 점주변동, 입지와 창업비 상한
+
 ## 로컬 실행
 
 ```bash
