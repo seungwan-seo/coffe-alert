@@ -339,6 +339,10 @@ def run_buysell(cfg: dict, state: dict, alerts: list, regions: list) -> None:
             daangn_buysell.polite_sleep(poll["buysell_delay_sec"])
             for item in items:
                 if is_seen(state, "buysell", item["id"]):
+                    # 규칙 보강 전에 감시 목록에 들어간 오탐도 가격 인하로 다시 알리지 않는다.
+                    if matching.rejects_buysell_item(search_cfg, item):
+                        state["buysell_watch"].pop(str(item["id"]), None)
+                        continue
                     # 이미 알림한 매물이 다시 보이면 가격 인하만 확인 (추가 요청 없음)
                     # 판매중 상태에서만 기준가를 비교·갱신 (예약중 가격 변동으로 인하 알림이 묻히는 것 방지)
                     watch = state["buysell_watch"].get(str(item["id"]))

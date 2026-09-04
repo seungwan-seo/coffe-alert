@@ -85,6 +85,33 @@ def test_goods_flood():
                                              "price": 10000, "title": t2, "content": ""}, 3)
             if v2 != want2:
                 fails.append(f"{section}/카페 폐업: '{t2[:24]}' 기대 {want2} 실제 {v2}")
+        # "폐업 일괄"은 모든 업종의 재고가 검색된다. 카페·주방 장비 신호가 없는
+        # 굿즈/의류/운동시설 폐업 재고는 막고, 실제 업소 장비만 남겨야 한다.
+        bulk = next((x for x in cfg[section]["searches"] if x["keyword"] == "폐업 일괄"), None)
+        if bulk:
+            for title, content, want in [
+                ("키링 인형 349개 일괄 (개당2500)", "모두 새상품이고 폐업정리라 일괄로만 판매합니다", "perm"),
+                ("키링 인형 349개 일괄 (개당2500)", "카페 폐업으로 재고와 커피머신도 일괄 정리합니다", "perm"),
+                ("여성 의류 200벌 일괄", "옷가게 폐업 정리, 행거 포함", "perm"),
+                ("[도장폐업] 타타미 매트 + 운동기구 전체 일괄", "폐업 일괄 판매", "perm"),
+                ("귀여운 과일 모양 단추 세트 (새제품)", "매장 폐업 정리로 진열대와 함께 판매합니다", "perm"),
+                ("다양한 사과 단추 세트", "폐업 일괄, 매장 집기와 함께 정리합니다", "perm"),
+                ("귀여운 고양이 4구 키캡키링 2종 -개별가격(새제품)", "폐업 일괄 판매", "perm"),
+                ("반짝이는 향수병 키링 (N5, No.1) 개별가격", "매장 폐업 정리", "perm"),
+                ("진주 큐빅 헤어집게핀 &자동핀 2종 일괄 새제품", "폐업 일괄, 진열대 포함", "perm"),
+                ("큐빅 포인트 헤어 집게핀 2개 세트 (로즈/화이트)", "매장 폐업 정리", "perm"),
+                ("반짝이는 별 모양 큐빅 브로치 3개 세트", "폐업 일괄, 진열대 포함", "perm"),
+                ("카페 폐업 집기 일괄", "커피머신, 제빙기, 테이블 포함", "match"),
+                ("식당 폐업 일괄 정리", "업소용 냉장고, 싱크대, 작업대 포함", "match"),
+            ]:
+                verdict = matching.match_buysell(
+                    bulk,
+                    {"status": "Ongoing", "created_at": now, "price": 10000,
+                     "title": title, "content": content},
+                    3,
+                )
+                if verdict != want:
+                    fails.append(f"{section}/폐업 일괄: '{title[:24]}' 기대 {want} 실제 {verdict}")
         scs = [x for x in cfg[section]["searches"] if x.get("handover")]
         if not any(x.get("require_any") for x in scs):
             fails.append(f"{section}: handover 검색에 require_any 없음")

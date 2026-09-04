@@ -71,6 +71,7 @@
 - 알림의 "지도" 링크(`main.kakao_map_link`): 좌표가 있으면 `map.kakao.com/link/map/{이름},{lat},{lon}`으로 **지점을 정확히 찍고**, 없으면 `?q=주소` 검색으로 폴백. 중개사 매물은 주소가 동 단위뿐인 경우가 많아 좌표 경로가 기본이다
 - 부동산 열거: 구 단위 카테고리 페이지(`/map/서울특별시/{구}/{카테고리}`) SSR 20건 + `sitemap-articles/1`(ID 내림차순, 하루 1회 재생성). 시 단위 카테고리 페이지는 404. CDN 캐시 1시간
 - 중고거래: `?in={동id}&search={kw}&_data=routes/kr.buy-sell._index` JSON. **동 단위만 검색됨**(시/구 id는 대표 동으로 폴백). UA 헤더 필수. HTTP/2 금지(requests는 1.1이라 OK). 페이지네이션 없음
+  - 검색 규칙은 `aliases`로 표기 변형을 받고, `require_any` 중 하나가 있어야 통과시킬 수 있다. `reject_any`는 명백한 제외 품목을 먼저 영구 탈락시키며 `require_any`보다 우선한다
 - 서울 행정동 id: 저번호 대역(3~460), `seoul_regions.json`에 399개 수집됨
 - GitHub Actions: public 저장소여야 무료 무제한. 상태는 `state/seen.json` 커밋 방식
 - **번개장터**: `api.bunjang.co.kr/api/1/find_v2.json?q=&order=date&n=` 인증 불필요. `status "0"`=판매중. 지역 파라미터 무시됨 → `location` 문자열로 필터. 절반 가까이 지역 미표기

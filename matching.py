@@ -513,6 +513,15 @@ def match_realty(cfg: dict, listing: dict):
     return None
 
 
+def rejects_buysell_item(search_cfg: dict, item: dict) -> bool:
+    """검색 규칙의 명백한 제외 품목인지 판정한다.
+
+    신규 매칭뿐 아니라 이미 감시 중인 상품의 가격 인하 알림에도 같은 규칙을 쓴다.
+    """
+    text = f"{item.get('title') or ''} {item.get('content') or ''}"
+    return any(phrase in text for phrase in search_cfg.get("reject_any") or [])
+
+
 def match_buysell(search_cfg: dict, item: dict, freshness_days: float = 3) -> str:
     """item: daangn_buysell.search() 결과의 아이템. 판정을 반환한다:
     - "match": 알림 대상
@@ -538,6 +547,11 @@ def match_buysell(search_cfg: dict, item: dict, freshness_days: float = 3) -> st
     # 당근 검색은 키워드 없는 연관 상품도 섞어 준다 — 키워드(또는 별칭) 토큰이
     # 제목/본문에 실제로 있어야 알림. aliases로 표기 변형(커피 머신/에스프레소 머신 등)을 인정한다.
     text = f"{item.get('title') or ''} {item.get('content') or ''}"
+    # reject_any: 검색어 자체는 맞아도 품목이 명백히 대상 밖이면 즉시 영구 탈락.
+    # require_any보다 먼저 적용해 "키링 재고 + 카페 폐업"처럼 본문에 우연히
+    # 카페 장비 단어까지 들어간 글도 다시 알리지 않는다.
+    if rejects_buysell_item(search_cfg, item):
+        return "perm"
     # 제외어가 있으면 그 부분을 지우고 판정한다 ("만화카페 폐업" 같은 다른 업종 걸러내기)
     for phrase in search_cfg.get("exclude_keywords") or []:
         text = text.replace(phrase, "")
